@@ -87,3 +87,4 @@ The game engine should eventually support:
 - AI
 - canonical game analysis
 
+The game state stores game concepts, not visual concepts. For example, it stores dots and moves, but never SVG elements or colours.

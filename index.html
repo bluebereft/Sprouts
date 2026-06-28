@@ -36,24 +36,26 @@
         <!-- Start button -->
         <button id="start-btn" class="btn-primary">Start Game</button>
 
+        <!--
+          Create Move button.
+          Hidden by default via the btn--hidden class.
+          UI.syncCreateMoveButton() shows it when both endpoints are selected.
+        -->
+        <button id="create-move-btn" class="btn-secondary btn--hidden">
+          Create Move
+        </button>
+
       </div>
       <!-- /controls -->
 
       <!-- ─── Status message ────────────────────────────────────── -->
       <!--
-        v0.2: displays feedback about the current selection.
         Text is set exclusively by UI.setStatus() — never hardcoded here.
-        The default "Click a dot to begin." is written by JS on init.
       -->
       <p id="status" class="status"></p>
       <!-- /status -->
 
       <!-- ─── Board ─────────────────────────────────────────────── -->
-      <!--
-        The SVG acts as the game board.
-        Width and height are set here; the JS renderer uses these values.
-        All game graphics are drawn inside this element.
-      -->
       <svg
         id="board"
         class="board"
@@ -62,9 +64,24 @@
         viewBox="0 0 700 500"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <!-- Dots and curves will be injected here by renderer.js -->
+        <!-- Dots will be injected here by renderer.js -->
       </svg>
       <!-- /board -->
+
+      <!-- ─── Debug: move list ──────────────────────────────────── -->
+      <!--
+        v0.3.0: a plain-text log of committed Move objects.
+        Populated by UI.renderMoveList() after each commitMove().
+        This section will be removed or replaced when a proper game
+        log UI is designed in a later sprint.
+      -->
+      <section class="move-list-section">
+        <h2 class="move-list-section__title">Moves</h2>
+        <div id="move-list">
+          <!-- Move items injected by ui.js -->
+        </div>
+      </section>
+      <!-- /move-list -->
 
     </div>
     <!-- /card -->
@@ -73,14 +90,12 @@
   <!-- /page -->
 
   <!--
-    Scripts are loaded in dependency order.
-    Each file depends only on the files above it in this list.
-
-    models.js   — data shape definitions (no dependencies)
-    state.js    — game state, depends on models.js
-    renderer.js — SVG drawing, depends on state.js
-    ui.js       — controls and events, depends on state.js + renderer.js
-    app.js      — entry point, depends on ui.js
+    Scripts loaded in dependency order.
+    models.js   — data shapes          (no dependencies)
+    state.js    — game state           depends on models.js
+    renderer.js — SVG drawing          depends on state.js
+    ui.js       — controls and events  depends on state.js + renderer.js
+    app.js      — entry point          depends on ui.js
   -->
   <script src="js/models.js"></script>
   <script src="js/state.js"></script>

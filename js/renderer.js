@@ -1,5 +1,5 @@
 /* ================================================================
-   renderer.js — Sprouts v0.2.3
+   renderer.js — Sprouts v0.3.0
    
    Responsibility
    ──────────────
@@ -7,23 +7,26 @@
    This is the only module that writes to the SVG DOM.
    
    Renderer reads from State when it needs game data, but it never
-   reads from HTML controls and never sets status text. Those are
-   UI's concerns.
+   reads from HTML controls and never sets status text.
    
-   Design — retained element architecture
-   ───────────────────────────────────────
-   SVG circles are created once per game (in initBoard) and kept
-   alive in the DOM for the entire game. When the selection changes,
-   only the two affected circles have their CSS class updated.
-   No elements are destroyed or re-created on selection changes.
+   Design — retained element architecture (unchanged from v0.2.1)
+   ───────────────────────────────────────────────────────────────
+   SVG circles are created once per game in initBoard() and kept
+   alive in the DOM for the entire game. Only CSS classes change.
    
-   This avoids the dot-appear animation re-firing on every click and
-   eliminates unnecessary DOM churn.
+   v0.3.0 changes
+   ──────────────
+   updateSelection() now accepts objects describing which dot changed
+   in each slot (first / second), rather than a single previous/next
+   pair. This lets both highlights be managed independently.
    
-   circleEls: Map<dotId, SVGCircleElement>
-      The retained element store. Populated by initBoard(), read by
-      updateSelection(). Cleared at the start of each initBoard() call
-      so stale references from a previous game never linger.
+   Signature:
+     updateSelection(prev, next)
+       prev  { first: number|null, second: number|null }
+       next  { first: number|null, second: number|null }
+   
+   The helper applyDotClass() centralises the class-name logic so the
+   two selection slots share one code path.
    
    Depends on: state.js (State)
    Load order: after state.js.
@@ -31,61 +34,63 @@
 
 const Renderer = (() => {
 
-  // Required namespace for creating valid SVG elements.
-  const SVG_NS = 'http://www.w3.org/2000/svg';
-
-  // Dot radius in SVG user units. Diameter = DOT_RADIUS * 2.
+  const SVG_NS     = 'http://www.w3.org/2000/svg';
   const DOT_RADIUS = 8;
 
-  // ── Retained element store ─────────────────────────────────────
-  // Map<number, SVGCircleElement>: dot id → its live <circle> element.
-  // Gives O(1) lookup when patching selection without iterating the DOM.
+  // Map<dotId, SVGCircleElement> — retained element store.
   let circleEls = new Map();
 
   // ── Private helpers ────────────────────────────────────────────
 
   /**
-   * Removes all child nodes from the board SVG and clears circleEls.
-   * Only ever called from initBoard() at the start of a new game.
-   *
+   * Removes all SVG children and clears the element store.
    * @param {SVGElement} board
    */
   function clearBoard(board) {
-    while (board.firstChild) {
-      board.removeChild(board.firstChild);
-    }
+    while (board.firstChild) board.removeChild(board.firstChild);
     circleEls.clear();
   }
 
   /**
-   * Creates one <circle> SVG element for a dot, appends it to the
-   * board, and registers it in circleEls.
+   * Derives the correct CSS class string for a dot given the current
+   * selection state. Both slots are checked so a dot that is selected
+   * as both first and second (a loop move) receives the selected class.
    *
-   * Sets the correct class immediately in case State already holds a
-   * selection when initBoard() is called (defensive; unlikely in
-   * current usage but correct by design).
+   * @param {number} dotId
+   * @returns {string}
+   */
+  function dotClass(dotId) {
+    const isFirst  = dotId === State.getFirstSelectedDotId();
+    const isSecond = dotId === State.getSecondSelectedDotId();
+    return (isFirst || isSecond) ? 'dot dot--selected' : 'dot';
+  }
+
+  /**
+   * Applies the correct class to a single circle element.
+   * No-ops silently if the element isn't in the store (defensive).
    *
+   * @param {number|null} dotId
+   */
+  function applyDotClass(dotId) {
+    if (dotId === null) return;
+    const el = circleEls.get(dotId);
+    if (el) el.setAttribute('class', dotClass(dotId));
+  }
+
+  /**
+   * Creates one <circle> for a dot, appends it, registers it.
    * @param {SVGElement} board
-   * @param {object}     dot   — Dot object from State.getDots()
-   * @param {number}     index — position in dots array (animation stagger)
+   * @param {object}     dot
+   * @param {number}     index
    */
   function createDotElement(board, dot, index) {
     const circle = document.createElementNS(SVG_NS, 'circle');
-
     circle.setAttribute('cx', dot.x);
     circle.setAttribute('cy', dot.y);
     circle.setAttribute('r',  DOT_RADIUS);
-
-    const isSelected = (dot.id === State.getSelectedDotId());
-    circle.setAttribute('class', isSelected ? 'dot dot--selected' : 'dot');
-
-    // CSS custom property drives the staggered appear animation.
+    circle.setAttribute('class', dotClass(dot.id));
     circle.style.setProperty('--dot-index', index);
-
-    // data-dot-id is read by the UI click handler to identify which
-    // dot was clicked, without the UI needing to inspect coordinates.
     circle.dataset.dotId = dot.id;
-
     board.appendChild(circle);
     circleEls.set(dot.id, circle);
   }
@@ -94,13 +99,8 @@ const Renderer = (() => {
 
   /**
    * Initialises the board for a new game.
-   * Clears all existing SVG content, then creates one <circle> per dot
-   * currently in State. After this call, circles are stable in the DOM
-   * for the rest of the game — only updateSelection() modifies them.
-   *
-   * Call once per game start, after State.initDots().
-   *
-   * @param {SVGElement} board — the <svg> element that is the game board
+   * Creates one circle per dot in State; stable for the game's lifetime.
+   * @param {SVGElement} board
    */
   function initBoard(board) {
     clearBoard(board);
@@ -108,25 +108,26 @@ const Renderer = (() => {
   }
 
   /**
-   * Updates the visual selection state of exactly the two circles
-   * that changed. No other DOM nodes are touched.
+   * Updates the visual highlight of exactly the dot ids that changed.
    *
-   * Call after State.selectDot() or State.clearSelection(), passing
-   * the ids from before and after the state mutation.
+   * The caller supplies both the previous and next selection state.
+   * Only the union of changed ids is touched — typically two elements
+   * per click at most.
    *
-   * @param {number|null} previousId — dot that lost selection (null = none)
-   * @param {number|null} nextId     — dot that gained selection (null = none)
+   * @param {{ first: number|null, second: number|null }} prev
+   * @param {{ first: number|null, second: number|null }} next
    */
-  function updateSelection(previousId, nextId) {
-    if (previousId !== null) {
-      const prev = circleEls.get(previousId);
-      if (prev) prev.setAttribute('class', 'dot');
-    }
+  function updateSelection(prev, next) {
+    // Collect every id that appeared in either the old or new selection.
+    // Using a Set de-duplicates naturally (e.g. when a dot is first AND
+    // second, or when the same id appears in both prev and next).
+    const touched = new Set([prev.first, prev.second, next.first, next.second]);
+    touched.delete(null);   // null is not a dot id
 
-    if (nextId !== null) {
-      const next = circleEls.get(nextId);
-      if (next) next.setAttribute('class', 'dot dot--selected');
-    }
+    // Re-apply the class for each affected dot. dotClass() reads the
+    // current State, which has already been mutated by the time this
+    // function is called, so each dot gets the right class.
+    touched.forEach(applyDotClass);
   }
 
   return { initBoard, updateSelection };
