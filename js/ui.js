@@ -110,9 +110,15 @@ const UI = (() => {
       setStatus('Select second endpoint.');
 
     } else if (clickedId === prevFirst) {
-      // Clicked the first dot again → deselect it (and implicitly second).
-      State.clearFirst();
-      setStatus('Select first endpoint.');
+
+      // Keep the remaining endpoint selected.
+        if (prevSecond !== null) {
+        State.promoteSecondToFirst();
+        setStatus('Select second endpoint.');
+        } else {
+        State.clearFirst();
+        setStatus('Select first endpoint.');
+    }
 
     } else if (prevSecond === null) {
       // First is set, second is empty, clicked a different dot → set second.
@@ -124,13 +130,7 @@ const UI = (() => {
       State.clearSecond();
       setStatus('Select second endpoint.');
 
-    } else if (clickedId === prevFirst) {
-      // Clicked the first dot while second is also set → clear first (and second).
-      // (Reached only if prevFirst !== null AND prevSecond !== null AND clickedId === prevFirst.
-      //  This branch is unreachable given the order above, but included for clarity.)
-      State.clearFirst();
-      setStatus('Select first endpoint.');
-
+  
     } else {
       // Both slots filled, player clicked a third dot.
       // Treat as: replace the second endpoint with the new dot.

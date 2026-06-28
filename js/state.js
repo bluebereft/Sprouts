@@ -120,6 +120,12 @@ const State = (() => {
     secondSelectedDotId = null;
   }
 
+  // Promote the second endpoint to the first.
+  function promoteSecondToFirst() {
+    firstSelectedDotId = secondSelectedDotId;
+    secondSelectedDotId = null;
+}
+  
   /**
    * Clears only the second selection, leaving the first intact.
    */
@@ -165,6 +171,7 @@ const State = (() => {
     selectFirst,
     selectSecond,
     clearFirst,
+    promoteSecondToFirst,
     clearSecond,
     clearSelections,
     getMoves,
