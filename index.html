@@ -95,13 +95,9 @@
     state.js    — game state           depends on models.js
     renderer.js — SVG drawing          depends on state.js
     ui.js       — controls and events  depends on state.js + renderer.js
-    app.js      — entry point          depends on ui.js
+    app.js      — single module entry point. loaded with type="module"
   -->
-  <script src="js/models.js"></script>
-  <script src="js/state.js"></script>
-  <script src="js/renderer.js"></script>
-  <script src="js/ui.js"></script>
-  <script src="js/app.js"></script>
+<script type="module" src="js/app.js"></script>
 
 </body>
 </html>

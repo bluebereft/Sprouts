@@ -32,6 +32,11 @@
    Load order: after renderer.js.
    ================================================================ */
 
+import { createMove } from './engine/move.js';
+import Engine from './engine/engine.js';
+import State from './engine/state.js';
+import Renderer from './renderer.js';
+
 const UI = (() => {
 
   // ── Cached element references (set in init) ────────────────────
@@ -67,7 +72,7 @@ const UI = (() => {
    * Called after every commitMove() and after game reset.
    */
   function renderMoveList() {
-    const moves = State.getMoves();
+    const moves = Engine.getState().moves ?? [];
 
     if (moves.length === 0) {
       moveListEl.innerHTML = '<p class="move-list__empty">No moves yet.</p>';
@@ -102,41 +107,31 @@ const UI = (() => {
     const prevFirst  = State.getFirstSelectedDotId();
     const prevSecond = State.getSecondSelectedDotId();
 
-    // ── Selection logic ──────────────────────────────────────────
-
-    if (prevFirst === null) {
-      // Nothing selected yet — set as first endpoint.
-      State.selectFirst(clickedId);
-      setStatus('Select second endpoint.');
-
-    } else if (clickedId === prevFirst) {
-
-      // Keep the remaining endpoint selected.
-        if (prevSecond !== null) {
-        State.promoteSecondToFirst();
+        if (prevFirst === null) {
+        State.selectFirst(clickedId);
         setStatus('Select second endpoint.');
+
+        } else if (clickedId === prevFirst) {
+        if (prevSecond !== null) {
+            State.promoteSecondToFirst();
+            setStatus('Select second endpoint.');
         } else {
-        State.clearFirst();
-        setStatus('Select first endpoint.');
-    }
+            State.clearFirst();
+            setStatus('Select first endpoint.');
+        }
 
-    } else if (prevSecond === null) {
-      // First is set, second is empty, clicked a different dot → set second.
-      State.selectSecond(clickedId);
-      setStatus('Ready to create move.');
+        } else if (prevSecond === null) {
+        State.selectSecond(clickedId);
+        setStatus('Ready to create move.');
 
-    } else if (clickedId === prevSecond) {
-      // Clicked the second dot again → deselect only second.
-      State.clearSecond();
-      setStatus('Select second endpoint.');
+        } else if (clickedId === prevSecond) {
+        State.clearSecond();
+        setStatus('Select second endpoint.');
 
-  
-    } else {
-      // Both slots filled, player clicked a third dot.
-      // Treat as: replace the second endpoint with the new dot.
-      State.selectSecond(clickedId);
-      setStatus('Ready to create move.');
-    }
+        } else {
+        State.selectSecond(clickedId);
+        setStatus('Ready to create move.');
+        }
 
     // ── Renderer sync ────────────────────────────────────────────
     Renderer.updateSelection(
@@ -149,32 +144,38 @@ const UI = (() => {
 
   // ── Create Move handler ────────────────────────────────────────
 
-  /**
-   * Commits the current two-endpoint selection as a Move, then resets
-   * the selection UI and refreshes the move list.
-   */
-  function handleCreateMove() {
-    // Guard: both endpoints must be set. (Button visibility enforces this
-    // in practice, but a guard here keeps the handler self-contained.)
-    if (State.getFirstSelectedDotId()  === null) return;
+    /**
+     * Commits the current two-endpoint selection as a Move,
+     * applies it to the engine, then updates UI.
+     */
+    function handleCreateMove() {
+    if (State.getFirstSelectedDotId() === null) return;
     if (State.getSecondSelectedDotId() === null) return;
 
-    // Capture selection for the renderer diff before State clears it.
-    const prevFirst  = State.getFirstSelectedDotId();
-    const prevSecond = State.getSecondSelectedDotId();
+    // ── 1. Capture selection ───────────────────────────────
+    const a = State.getFirstSelectedDotId();
+    const b = State.getSecondSelectedDotId();
 
-    State.commitMove();   // appends Move to moves[], clears selections
+    const prevFirst = a;
+    const prevSecond = b;
 
-    // Remove highlights from the two dots that were selected.
+    // ── 2. Create MOVE (engine domain object) ──────────────
+    const move = createMove(a, b);
+
+    // ── 3. Apply ENGINE transition (single source of truth) ─
+    Engine.apply(move);
+    State.clearSelections();   // missing piece
+    
+    // ── 4. Clear UI selection visuals ───────────────────────
     Renderer.updateSelection(
-      { first: prevFirst,  second: prevSecond },
-      { first: null,       second: null       }
+        { first: prevFirst, second: prevSecond },
+        { first: null, second: null }
     );
 
     syncCreateMoveButton();
     setStatus('Move created. Select first endpoint.');
     renderMoveList();
-  }
+    }
 
   // ── Game start ─────────────────────────────────────────────────
 
@@ -182,18 +183,30 @@ const UI = (() => {
    * @param {HTMLSelectElement} select
    * @param {SVGElement}        board
    */
-  function startGame(select, board) {
+    function startGame(select, board) {
     const count  = parseInt(select.value, 10);
     const boardW = parseFloat(board.getAttribute('width'));
     const boardH = parseFloat(board.getAttribute('height'));
 
     State.initDots(count, boardW, boardH);
+
     Renderer.initBoard(board);
+
+    /**
+     * Engine is initialized ONCE per game start.
+     * UI state is used only as initial snapshot.
+     */
+    Engine.init({
+        dots: State.getDots(),
+        edges: [],
+        nextDotId: count,
+        moves: []
+    });
 
     syncCreateMoveButton();
     setStatus('Select first endpoint.');
     renderMoveList();
-  }
+    }
 
   // ── Init ───────────────────────────────────────────────────────
 
@@ -220,6 +233,12 @@ const UI = (() => {
     startGame(select, board);
   }
 
-  return { init };
+  return {
+    init
+  };
 
 })();
+
+export function init() {
+  return UI.init();
+}

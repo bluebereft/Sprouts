@@ -33,7 +33,7 @@
  * @param {number} y
  * @returns {{ id: number, x: number, y: number, lives: number }}
  */
-function createDot(id, x, y) {
+export function createDot(id, x, y) {
   return {
     id,
     x,

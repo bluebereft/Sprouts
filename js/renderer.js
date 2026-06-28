@@ -32,6 +32,8 @@
    Load order: after state.js.
    ================================================================ */
 
+import State from './engine/state.js';
+
 const Renderer = (() => {
 
   const SVG_NS     = 'http://www.w3.org/2000/svg';
@@ -133,3 +135,4 @@ const Renderer = (() => {
   return { initBoard, updateSelection };
 
 })();
+export default Renderer;

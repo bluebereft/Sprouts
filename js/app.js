@@ -1,18 +1,20 @@
 /* ================================================================
-   app.js — Sprouts v0.2.3
-   
+   app.js — Sprouts v0.4 (Module Entry Point)
+
    Responsibility
    ──────────────
-   Application entry point. The only job of this file is to start
-   the application once the DOM is ready.
-   
-   app.js does not contain game logic, rendering, or UI wiring.
-   All of that lives in the modules it depends on. This file exists
-   so there is one unambiguous place to look for "where does it all
-   begin?" and so that the startup call is not buried inside a module
-   that has other responsibilities.
-   
-   Load order: last — after models.js, state.js, renderer.js, ui.js.
+   This is the single entry point for the application.
+   It loads the UI module and starts the game after DOM ready.
    ================================================================ */
 
-document.addEventListener('DOMContentLoaded', UI.init);
+import { init as initUI } from './ui.js';
+
+/**
+ * Initializes the entire application.
+ */
+function init() {
+  initUI();
+  console.log('Sprouts initialized');
+}
+
+document.addEventListener('DOMContentLoaded', init);
