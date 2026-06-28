@@ -19,8 +19,8 @@
   --color-text-muted:   #7B756E;   /* warm mid-grey for labels        */
   --color-border:       #DDD7CF;   /* warm, soft border               */
   --color-dot:          #4F6D5A;   /* dot fill — matches accent       */
-  --color-dot-stroke:   #3a5244;   /* dot outline — slightly deeper   */
-  --color-selection:    #6B8FB3;   /* muted accent blue for selection */
+  --color-dot-stroke:   #4F6D5A;   /* dot outline — matches dot   */
+  --color-selection:    #2E2B28;   /* charcoal ring for selection */
 
   /* Board */
   --board-bg:           #F3F0EA;   /* warm linen tone                 */

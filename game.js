@@ -149,7 +149,7 @@ const State = (() => {
 const Renderer = (() => {
 
   const SVG_NS     = 'http://www.w3.org/2000/svg';
-  const DOT_RADIUS = 8;
+  const DOT_RADIUS = 10;
 
   // ── Retained element store ─────────────────────────────────────
   // Maps dot id (number) → the live SVGCircleElement for that dot.
