@@ -1,40 +1,50 @@
 /* ================================================================
-   style.css — Sprouts v0.2
+   style.css — Sprouts v0.2.1
    
    Design tokens are declared as CSS custom properties at the top.
    Everything else references those tokens so future reskins are easy.
+   
+   Palette: warm off-whites, charcoal text, forest green accent.
+   Typography: Inter (Google Fonts).
    ================================================================ */
 
 /* ── Design tokens ─────────────────────────────────────────────── */
 :root {
-  /* Palette */
-  --color-bg:           #f0f2f5;   /* light grey page background     */
-  --color-card:         #ffffff;   /* white card surface             */
-  --color-accent:       #3a9e5f;   /* green — the game's signature   */
-  --color-accent-hover: #2e8050;   /* darker green for hover state   */
-  --color-text:         #1a1a1a;   /* near-black body text           */
-  --color-text-muted:   #6b7280;   /* secondary / label text         */
-  --color-border:       #e5e7eb;   /* subtle borders                 */
-  --color-dot:          #3a9e5f;   /* dot fill — matches accent      */
-  --color-dot-stroke:   #1f5c38;   /* dot outline — darker green     */
-  --color-selection:    #2563eb;   /* blue outline for selected dot  */
+  /* Palette — warm, never pure-white or pure-black */
+  --color-bg:           #F7F5F2;   /* warm off-white page background  */
+  --color-card:         #FFFCF8;   /* slightly warmer card surface    */
+  --color-accent:       #4F6D5A;   /* forest green                    */
+  --color-accent-hover: #3d5647;   /* deeper green for hover          */
+  --color-text:         #2E2B28;   /* charcoal — warm near-black      */
+  --color-text-muted:   #7B756E;   /* warm mid-grey for labels        */
+  --color-border:       #DDD7CF;   /* warm, soft border               */
+  --color-dot:          #4F6D5A;   /* dot fill — matches accent       */
+  --color-dot-stroke:   #3a5244;   /* dot outline — slightly deeper   */
+  --color-selection:    #6B8FB3;   /* muted accent blue for selection */
 
   /* Board */
-  --board-bg:           #fafafa;   /* very light board background    */
-  --board-border:       #e5e7eb;
+  --board-bg:           #F3F0EA;   /* warm linen tone                 */
+  --board-border:       #DDD7CF;
 
-  /* Spacing */
+  /* Spacing — generous to let the layout breathe */
   --space-sm:   8px;
   --space-md:  16px;
-  --space-lg:  24px;
-  --space-xl:  40px;
+  --space-lg:  28px;
+  --space-xl:  48px;
 
   /* Typography */
-  --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-sans: "Inter", sans-serif;
 
   /* Card */
-  --card-radius: 16px;
-  --card-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  --card-radius: 20px;
+  --card-shadow:
+    0 2px  4px rgba(46, 43, 40, 0.04),
+    0 8px 24px rgba(46, 43, 40, 0.08);   /* layered shadow feels softer */
+
+  /* Controls — shared values for button and dropdown */
+  --control-height:  42px;
+  --control-radius:  999px;   /* full pill */
+  --control-px:      20px;    /* horizontal padding */
 }
 
 /* ── Reset / base ───────────────────────────────────────────────── */
@@ -53,13 +63,14 @@ body {
   align-items: center;
   justify-content: center;
   padding: var(--space-xl) var(--space-md);
+  /* Slightly loose line-height gives the whole page a calmer feel */
+  line-height: 1.5;
 }
 
 /* ── Page layout ────────────────────────────────────────────────── */
 .page {
-  /* Centers the card; the body flexbox handles vertical + horizontal */
   width: 100%;
-  max-width: 780px;   /* slightly wider than the 700px board + padding */
+  max-width: 790px;   /* comfortable margin around the 700px board */
 }
 
 /* ── Card ───────────────────────────────────────────────────────── */
@@ -67,6 +78,7 @@ body {
   background: var(--color-card);
   border-radius: var(--card-radius);
   box-shadow: var(--card-shadow);
+  border: 1px solid var(--color-border);   /* hairline keeps the card grounded */
   padding: var(--space-xl);
   display: flex;
   flex-direction: column;
@@ -75,110 +87,132 @@ body {
 
 /* ── Title ──────────────────────────────────────────────────────── */
 .title {
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 1.875rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
   color: var(--color-text);
 
-  /* A thin left border in the accent colour gives the title a quiet
-     but distinctive mark without adding decorative clutter. */
+  /* Warm green left-border gives the title a grounded anchor */
   padding-left: var(--space-md);
-  border-left: 4px solid var(--color-accent);
+  border-left: 3px solid var(--color-accent);
 }
 
 /* ── Controls bar ───────────────────────────────────────────────── */
 .controls {
   display: flex;
   align-items: center;
-  gap: var(--space-md);
-  flex-wrap: wrap;   /* wraps on narrow screens */
+  gap: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 .control-label {
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 500;
   color: var(--color-text-muted);
   white-space: nowrap;
+  /* A little breathing room between label and the control beside it */
+  margin-right: 4px;
 }
 
 /* ── Dropdown ───────────────────────────────────────────────────── */
+/*
+  Styled to match the button shape (pill, same height, same padding)
+  so the controls bar reads as a unified group.
+*/
 .select {
   appearance: none;
   -webkit-appearance: none;
-  background: var(--color-card);
+
+  height: var(--control-height);
+  padding: 0 40px 0 var(--control-px);   /* extra right room for chevron */
+  border-radius: var(--control-radius);
   border: 1.5px solid var(--color-border);
-  border-radius: 8px;
-  padding: 8px 36px 8px 12px;
-  font-size: 0.95rem;
+  background-color: var(--color-card);
+
+  /* Warm-grey chevron; colour matches --color-text-muted */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237B756E' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+
   font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 500;
   color: var(--color-text);
   cursor: pointer;
 
-  /* Custom chevron via SVG background image */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
 
-  transition: border-color 0.15s ease;
+.select:hover {
+  border-color: var(--color-accent);
 }
 
 .select:focus {
   outline: none;
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(79, 109, 90, 0.15);
 }
 
 /* ── Primary button ─────────────────────────────────────────────── */
 .btn-primary {
+  height: var(--control-height);
+  padding: 0 var(--control-px);
+  border-radius: var(--control-radius);
+  border: none;
+
   background: var(--color-accent);
   color: #ffffff;
-  border: none;
-  border-radius: 8px;
-  padding: 9px 20px;
-  font-size: 0.95rem;
-  font-weight: 600;
+
   font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.1s ease;
   white-space: nowrap;
+
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
 }
 
 .btn-primary:hover {
   background: var(--color-accent-hover);
+  box-shadow: 0 2px 8px rgba(79, 109, 90, 0.25);
 }
 
 .btn-primary:active {
   transform: scale(0.97);
+  box-shadow: none;
 }
 
 .btn-primary:focus-visible {
-  outline: 3px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(79, 109, 90, 0.3);
 }
 
 /* ── SVG board ──────────────────────────────────────────────────── */
 .board {
-  display: block;             /* removes inline SVG gap              */
-  width: 100%;                /* scales down on small screens        */
-  max-width: 700px;           /* never wider than its native size    */
-  height: auto;               /* maintains the 700×500 aspect ratio  */
+  display: block;
+  width: 100%;
+  max-width: 700px;
+  height: auto;
   background: var(--board-bg);
   border: 1.5px solid var(--board-border);
-  border-radius: 10px;
+  border-radius: 14px;
 }
 
 /* ── SVG dot styles ─────────────────────────────────────────────── */
 /*
-  These selectors target SVG elements rendered by the RENDERER.
-  Keeping them here (not inline) makes future style changes trivial.
+  These selectors target SVG <circle> elements injected by the RENDERER.
+  Keeping visual decisions in CSS means the JS never hardcodes colours.
 */
 .dot {
-  fill:   var(--color-dot);
-  stroke: var(--color-dot-stroke);
+  fill:         var(--color-dot);
+  stroke:       var(--color-dot-stroke);
   stroke-width: 2;
-  cursor: default;
+  cursor:       default;
 
-  /* A gentle scale-in when dots first appear */
+  /* Gentle scale-in on first appearance */
   transform-origin: center;
   animation: dot-appear 0.25s ease-out both;
+  animation-delay: calc(var(--dot-index, 0) * 60ms);
 }
 
 @keyframes dot-appear {
@@ -186,16 +220,11 @@ body {
   to   { opacity: 1; transform: scale(1); }
 }
 
-/* Stagger each dot's animation using a custom property set by JS */
-.dot {
-  animation-delay: calc(var(--dot-index, 0) * 60ms);
-}
-
 /* ── Selected dot ───────────────────────────────────────────────── */
 /*
   Applied by the RENDERER when State reports a selected dot.
-  Overrides only the stroke; fill stays green so the dot reads as
-  the same object — just highlighted.
+  Only stroke changes — fill stays forest green.
+  The muted blue reads as "active" without clashing with the green.
 */
 .dot--selected {
   stroke:       var(--color-selection);
@@ -205,12 +234,14 @@ body {
 
 /* ── Status message ─────────────────────────────────────────────── */
 /*
-  Sits between the controls and the board.
-  Kept visually quiet — it informs without competing with the board.
+  Between controls and board. Quiet — informs without distracting.
+  min-height prevents the board from jumping when text appears.
 */
 .status {
-  font-size:    0.875rem;
+  font-size:    0.8125rem;
+  font-weight:  500;
   color:        var(--color-text-muted);
-  min-height:   1.25em;   /* reserves vertical space so board never jumps */
-  padding-left: 2px;      /* optical alignment with the board edge        */
+  min-height:   1.25em;
+  padding-left: 2px;
+  letter-spacing: 0.01em;
 }
