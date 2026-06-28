@@ -163,7 +163,8 @@ const UI = (() => {
     const move = createMove(a, b);
 
     // ── 3. Apply ENGINE transition (single source of truth) ─
-    Engine.apply(move);
+    const state = Engine.apply(move);
+    Renderer.renderEdges(state);
     State.clearSelections();   // missing piece
     
     // ── 4. Clear UI selection visuals ───────────────────────

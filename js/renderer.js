@@ -41,6 +41,7 @@ const Renderer = (() => {
 
   // Map<dotId, SVGCircleElement> — retained element store.
   let circleEls = new Map();
+  let boardEl = null;
 
   // ── Private helpers ────────────────────────────────────────────
 
@@ -105,8 +106,97 @@ const Renderer = (() => {
    * @param {SVGElement} board
    */
   function initBoard(board) {
+    boardEl = board;
     clearBoard(board);
     State.getDots().forEach((dot, index) => createDotElement(board, dot, index));
+  }
+
+  function renderEdges(state) {
+    if (!boardEl) return;
+    boardEl.querySelectorAll('line.edge').forEach(line => line.remove());
+    if (!state || !Array.isArray(state.edges) || !Array.isArray(state.dots)) return;
+
+    const dotById = new Map(state.dots.map(dot => [dot.id, dot]));
+    const syntheticEdges = new Map();
+
+    function isValidDot(dot) {
+      return dot
+        && Number.isFinite(Number(dot.x))
+        && Number.isFinite(Number(dot.y))
+        && !(Number(dot.x) === 0 && Number(dot.y) === 0);
+    }
+
+    function drawLine(x1, y1, x2, y2) {
+      const line = document.createElementNS(SVG_NS, 'line');
+      line.setAttribute('x1', x1);
+      line.setAttribute('y1', y1);
+      line.setAttribute('x2', x2);
+      line.setAttribute('y2', y2);
+      line.setAttribute('stroke', '#000');
+      line.setAttribute('stroke-width', '2');
+      line.setAttribute('class', 'edge');
+      boardEl.insertBefore(line, boardEl.firstChild);
+    }
+
+    state.edges.forEach(edge => {
+      const fromDot = dotById.get(edge.a);
+      const toDot   = dotById.get(edge.b);
+
+      if (!fromDot || !toDot) {
+        console.warn('Renderer.renderEdges: missing dot for edge, skipping', edge, { fromDot, toDot });
+        return;
+      }
+
+      const x1 = Number(fromDot.x);
+      const y1 = Number(fromDot.y);
+      const x2 = Number(toDot.x);
+      const y2 = Number(toDot.y);
+      const fromValid = isValidDot(fromDot);
+      const toValid = isValidDot(toDot);
+
+      if (fromValid && toValid) {
+        drawLine(x1, y1, x2, y2);
+        return;
+      }
+
+      // Synthetic new dot coordinates are not set yet; render a visible line
+      // between the two endpoints that share the same synthetic target id.
+      if (!toValid) {
+        const group = syntheticEdges.get(edge.b) || [];
+        group.push(edge);
+        syntheticEdges.set(edge.b, group);
+        return;
+      }
+
+      console.warn('Renderer.renderEdges: invalid coordinates for edge, skipping', edge, { fromDot, toDot });
+    });
+
+    syntheticEdges.forEach((edges, syntheticId) => {
+      if (edges.length !== 2) {
+        console.warn('Renderer.renderEdges: unexpected synthetic edge count, skipping', syntheticId, edges);
+        return;
+      }
+
+      const firstDot = dotById.get(edges[0].a);
+      const secondDot = dotById.get(edges[1].a);
+
+      if (!firstDot || !secondDot) {
+        console.warn('Renderer.renderEdges: missing source dot for synthetic edge, skipping', syntheticId, { firstDot, secondDot });
+        return;
+      }
+
+      const x1 = Number(firstDot.x);
+      const y1 = Number(firstDot.y);
+      const x2 = Number(secondDot.x);
+      const y2 = Number(secondDot.y);
+
+      if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) {
+        console.warn('Renderer.renderEdges: invalid synthetic coordinates, skipping', syntheticId, { firstDot, secondDot });
+        return;
+      }
+
+      drawLine(x1, y1, x2, y2);
+    });
   }
 
   /**
@@ -132,7 +222,7 @@ const Renderer = (() => {
     touched.forEach(applyDotClass);
   }
 
-  return { initBoard, updateSelection };
+  return { initBoard, renderEdges, updateSelection };
 
 })();
 export default Renderer;
