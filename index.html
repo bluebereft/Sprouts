@@ -36,6 +36,15 @@
       </div>
       <!-- /controls -->
 
+      <!-- ─── Status message ────────────────────────────────────── -->
+      <!--
+        v0.2: displays feedback about the current selection.
+        Text is set exclusively by UI.setStatus() — never hardcoded here.
+        The default "Click a dot to begin." is written by JS on init.
+      -->
+      <p id="status" class="status"></p>
+      <!-- /status -->
+
       <!-- ─── Board ─────────────────────────────────────────────── -->
       <!--
         The SVG acts as the game board.
@@ -50,7 +59,7 @@
         viewBox="0 0 700 500"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <!-- Dots and curves will be injected here by renderer.js -->
+        <!-- Dots and curves will be injected here by game.js -->
       </svg>
       <!-- /board -->
 

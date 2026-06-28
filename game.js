@@ -1,18 +1,18 @@
 /* ================================================================
-   game.js — Sprouts v0.1
+   game.js — Sprouts v0.2
    
    Architecture
    ─────────────
    This file is divided into three clearly labelled sections:
    
      STATE    — the single source of truth for game data.
-               Future: add connections, move history, whose turn it is.
+               v0.2 adds: selectedDotId — which dot (if any) is selected.
    
      RENDERER — pure drawing functions that read STATE and write SVG.
-               Future: draw curves, highlight active dots, animate moves.
+               v0.2 adds: applies/removes the .dot--selected CSS class.
    
      UI       — wires up HTML controls and calls into STATE / RENDERER.
-               Future: handle canvas clicks, show scores, undo button.
+               v0.2 adds: click handler on the board, setStatus helper.
    
    Nothing in RENDERER touches the DOM outside the SVG board.
    Nothing in STATE knows about SVG or HTML.
@@ -24,12 +24,14 @@
    STATE
    ─────
    Holds the current game data.
-   In v0.1 this is just an array of dot objects.
    
    Each dot: { id: number, x: number, y: number, lives: number }
    
-   "lives" = remaining available connections (always 3 for a fresh dot
-   in standard Sprouts). Stored now so the engine can use it later.
+   v0.2 addition
+   ─────────────
+   selectedDotId tracks which dot is currently selected (null = none).
+   UI never sets this directly — it calls the two selection helpers
+   so that future logic (e.g. "can this dot be selected?") lives here.
    ================================================================ */
 
 const State = (() => {
@@ -37,33 +39,33 @@ const State = (() => {
   // The list of dots currently on the board.
   let dots = [];
 
+  // The id of the currently selected dot, or null if none is selected.
+  let selectedDotId = null;
+
   /**
-   * Replaces the dot list with a fresh set of evenly spaced dots.
-   * 
+   * Replaces the dot list with a fresh set of evenly spaced dots,
+   * and resets any selection.
+   *
    * @param {number} count  — how many dots to create (2–6)
    * @param {number} boardW — SVG board width  in px
    * @param {number} boardH — SVG board height in px
    */
   function initDots(count, boardW, boardH) {
-    dots = [];
+    dots         = [];
+    selectedDotId = null;   // clear selection when the board resets
 
-    // We place all dots in a horizontal row through the vertical midpoint.
+    // Place all dots in a horizontal row through the vertical midpoint.
     const midY    = boardH / 2;
-
-    // Leave a margin on each side so dots don't hug the edge.
     const margin  = boardW * 0.12;
     const usableW = boardW - margin * 2;
-
-    // Spacing between dots. When count === 1 there's no gap, but the
-    // dropdown starts at 2 so this edge case won't appear in practice.
-    const step = count > 1 ? usableW / (count - 1) : 0;
+    const step    = count > 1 ? usableW / (count - 1) : 0;
 
     for (let i = 0; i < count; i++) {
       dots.push({
-        id:    i,                          // unique identifier
-        x:     margin + i * step,         // horizontal position
-        y:     midY,                       // vertical centre of board
-        lives: 3,                          // standard Sprouts rule
+        id:    i,
+        x:     margin + i * step,
+        y:     midY,
+        lives: 3,             // standard Sprouts rule
       });
     }
   }
@@ -73,8 +75,34 @@ const State = (() => {
     return [...dots];
   }
 
-  // Expose public interface only — internals stay private.
-  return { initDots, getDots };
+  /**
+   * Returns the id of the currently selected dot, or null.
+   * RENDERER and UI call this to know what to draw / display.
+   */
+  function getSelectedDotId() {
+    return selectedDotId;
+  }
+
+  /**
+   * Selects a dot by id.
+   * Call this when a dot is clicked and nothing is selected yet,
+   * OR when a different dot is clicked than the one already selected.
+   *
+   * @param {number} id — the dot's id
+   */
+  function selectDot(id) {
+    selectedDotId = id;
+  }
+
+  /**
+   * Clears the current selection (no dot selected).
+   * Call this when the already-selected dot is clicked again.
+   */
+  function clearSelection() {
+    selectedDotId = null;
+  }
+
+  return { initDots, getDots, getSelectedDotId, selectDot, clearSelection };
 
 })();
 
@@ -84,26 +112,25 @@ const State = (() => {
    ────────
    Reads from State and draws into the SVG board element.
    Never reads from HTML controls.
-   All SVG elements are created with createElementNS to keep them
-   valid SVG (plain createElement won't work for SVG namespaces).
+   
+   v0.2 addition
+   ─────────────
+   drawDot now checks State.getSelectedDotId() and adds the CSS class
+   "dot--selected" to the matching circle. The class is defined in
+   style.css, keeping all visual decisions out of this file.
    ================================================================ */
 
 const Renderer = (() => {
 
-  // The SVG namespace required for createElementNS.
-  const SVG_NS = 'http://www.w3.org/2000/svg';
-
-  // Dot radius in SVG user units (pixels at 1:1 scale).
+  const SVG_NS    = 'http://www.w3.org/2000/svg';
   const DOT_RADIUS = 8;
 
   /**
    * Removes all child elements from the board SVG.
-   * Call this before drawing a new game state.
-   * 
-   * @param {SVGElement} board — the <svg> board element
+   *
+   * @param {SVGElement} board
    */
   function clearBoard(board) {
-    // Remove children one at a time to avoid issues with live NodeLists.
     while (board.firstChild) {
       board.removeChild(board.firstChild);
     }
@@ -111,13 +138,11 @@ const Renderer = (() => {
 
   /**
    * Draws one dot as an SVG <circle>.
-   * 
-   * The CSS class "dot" applies fill, stroke, and the appear animation.
-   * The CSS custom property --dot-index staggers each dot's animation.
-   * 
-   * @param {SVGElement} board — the <svg> board element
-   * @param {object}     dot   — a dot object from State.getDots()
-   * @param {number}     index — position in the dots array (for stagger)
+   * Adds "dot--selected" if this dot's id matches the current selection.
+   *
+   * @param {SVGElement} board
+   * @param {object}     dot   — dot object from State.getDots()
+   * @param {number}     index — array position (used for animation stagger)
    */
   function drawDot(board, dot, index) {
     const circle = document.createElementNS(SVG_NS, 'circle');
@@ -125,31 +150,31 @@ const Renderer = (() => {
     circle.setAttribute('cx', dot.x);
     circle.setAttribute('cy', dot.y);
     circle.setAttribute('r',  DOT_RADIUS);
-    circle.setAttribute('class', 'dot');
 
-    // Pass the index to CSS so each dot's animation is slightly delayed.
+    // Build the class string. The selected dot gets an extra class;
+    // everything else is a plain dot.
+    const isSelected = (dot.id === State.getSelectedDotId());
+    circle.setAttribute('class', isSelected ? 'dot dot--selected' : 'dot');
+
+    // Stagger the appear animation via a CSS custom property.
     circle.style.setProperty('--dot-index', index);
 
-    // Store the dot id on the element for future click handling.
+    // Store the dot id so the UI click handler can identify which dot
+    // was clicked without inspecting coordinates.
     circle.dataset.dotId = dot.id;
 
     board.appendChild(circle);
   }
 
   /**
-   * Draws all dots from State onto the board.
-   * Clears the board first, then renders each dot.
-   * 
-   * @param {SVGElement} board — the <svg> board element
+   * Full redraw: clears the board then draws every dot.
+   * Called after any state change that affects what's on screen.
+   *
+   * @param {SVGElement} board
    */
   function render(board) {
     clearBoard(board);
-
-    const dots = State.getDots();
-
-    dots.forEach((dot, index) => {
-      drawDot(board, dot, index);
-    });
+    State.getDots().forEach((dot, index) => drawDot(board, dot, index));
   }
 
   return { render };
@@ -161,58 +186,122 @@ const Renderer = (() => {
    UI
    ──
    Binds HTML controls to State + Renderer.
-   This is the entry point that runs once the page has loaded.
+   
+   v0.2 additions
+   ──────────────
+   setStatus(msg) — writes text to the #status element.
+   Board click handler — interprets clicks on dots, updates State,
+     triggers a Renderer.render(), then updates the status message.
    ================================================================ */
 
 const UI = (() => {
 
+  // Cached reference to the status <p>. Set once in init().
+  let statusEl = null;
+
   /**
-   * Reads the current dropdown value and starts a new game:
-   * 1. Updates State with fresh dots.
-   * 2. Tells Renderer to redraw.
-   * 
-   * @param {HTMLSelectElement} select — the dot-count dropdown
-   * @param {SVGElement}        board  — the <svg> board element
+   * Writes a message to the status element.
+   * All status strings live here in UI — State and Renderer never
+   * know about human-readable messages.
+   *
+   * @param {string} msg
    */
-  function startGame(select, board) {
-    const count  = parseInt(select.value, 10);
+  function setStatus(msg) {
+    if (statusEl) statusEl.textContent = msg;
+  }
 
-    // Read the board's actual rendered dimensions from its attributes.
-    // We use the attribute values (not clientWidth) so the logic works
-    // even before the element is painted, and stays consistent with the
-    // SVG coordinate system set by viewBox.
-    const boardW = parseFloat(board.getAttribute('width'));
-    const boardH = parseFloat(board.getAttribute('height'));
+  /**
+   * Handles a click anywhere on the SVG board.
+   * Checks whether a dot was clicked by reading data-dot-id from the
+   * event target, then applies selection logic via State.
+   *
+   * Selection rules:
+   *   • Click an unselected dot  → select it.
+   *   • Click the selected dot   → deselect it.
+   *   • Click the board bg       → do nothing (no state change).
+   *
+   * After every state change, the board is redrawn and status updated.
+   *
+   * @param {MouseEvent} event
+   * @param {SVGElement} board
+   */
+  function handleBoardClick(event, board) {
+    // data-dot-id is set by the renderer on every <circle>.
+    // If the click landed on something else (board background, future
+    // curves, etc.) dotIdAttr will be undefined — we ignore it.
+    const dotIdAttr = event.target.dataset.dotId;
 
-    // 1. Update state.
-    State.initDots(count, boardW, boardH);
+    if (dotIdAttr === undefined) {
+      // Clicked empty space — no change.
+      return;
+    }
 
-    // 2. Redraw board.
+    // dataset values are always strings; convert to number for comparison.
+    const clickedId     = parseInt(dotIdAttr, 10);
+    const previouslySelected = State.getSelectedDotId();
+
+    if (clickedId === previouslySelected) {
+      // Clicking the already-selected dot toggles it off.
+      State.clearSelection();
+      setStatus('Selection cleared.');
+    } else {
+      // Clicking any other dot selects it (replacing any prior selection).
+      State.selectDot(clickedId);
+      // Dot ids are 0-based internally; display as 1-based for readability.
+      setStatus(`Dot ${clickedId + 1} selected.`);
+    }
+
+    // Always redraw after a state change so the highlight moves correctly.
     Renderer.render(board);
   }
 
   /**
-   * Runs once the DOM is ready.
-   * Grabs element references and attaches event listeners.
+   * Starts a fresh game:
+   * 1. Resets State (dots + selection).
+   * 2. Redraws board.
+   * 3. Resets status message.
+   *
+   * @param {HTMLSelectElement} select
+   * @param {SVGElement}        board
+   */
+  function startGame(select, board) {
+    const count  = parseInt(select.value, 10);
+    const boardW = parseFloat(board.getAttribute('width'));
+    const boardH = parseFloat(board.getAttribute('height'));
+
+    State.initDots(count, boardW, boardH);
+    Renderer.render(board);
+    setStatus('Click a dot to begin.');
+  }
+
+  /**
+   * Entry point. Runs once the DOM is ready.
+   * Caches element references and attaches all event listeners.
    */
   function init() {
     const startBtn = document.getElementById('start-btn');
     const select   = document.getElementById('dot-count');
     const board    = document.getElementById('board');
+    statusEl       = document.getElementById('status');
 
-    // Guard: bail early if any expected element is missing.
-    if (!startBtn || !select || !board) {
+    if (!startBtn || !select || !board || !statusEl) {
       console.error('Sprouts: could not find required DOM elements.');
       return;
     }
 
-    // Wire up the Start Game button.
+    // Start Game button.
     startBtn.addEventListener('click', () => {
       startGame(select, board);
     });
 
-    // Optional: start a default game immediately so the board isn't empty.
-    // Comment this line out if you prefer a blank board on first load.
+    // Board click — delegated to a single listener on the <svg>.
+    // Using one listener (rather than one per dot) means it keeps
+    // working after every render() call replaces the circle elements.
+    board.addEventListener('click', (event) => {
+      handleBoardClick(event, board);
+    });
+
+    // Auto-start so the board is never blank on first load.
     startGame(select, board);
   }
 
@@ -224,10 +313,9 @@ const UI = (() => {
 /* ================================================================
    Bootstrap
    ─────────
-   Wait for the DOM to be fully parsed before running UI.init().
-   game.js is loaded at the bottom of <body>, so the DOM is already
-   ready by the time this script executes — but using DOMContentLoaded
-   makes it safe to move the <script> tag to the <head> in the future.
+   DOMContentLoaded fires before game.js executes in most browsers
+   when the script is at the bottom of <body>, but the listener keeps
+   the code safe if the script is ever moved to <head>.
    ================================================================ */
 
 document.addEventListener('DOMContentLoaded', UI.init);

@@ -1,5 +1,5 @@
 /* ================================================================
-   style.css — Sprouts v0.1
+   style.css — Sprouts v0.2
    
    Design tokens are declared as CSS custom properties at the top.
    Everything else references those tokens so future reskins are easy.
@@ -17,6 +17,7 @@
   --color-border:       #e5e7eb;   /* subtle borders                 */
   --color-dot:          #3a9e5f;   /* dot fill — matches accent      */
   --color-dot-stroke:   #1f5c38;   /* dot outline — darker green     */
+  --color-selection:    #2563eb;   /* blue outline for selected dot  */
 
   /* Board */
   --board-bg:           #fafafa;   /* very light board background    */
@@ -188,4 +189,28 @@ body {
 /* Stagger each dot's animation using a custom property set by JS */
 .dot {
   animation-delay: calc(var(--dot-index, 0) * 60ms);
+}
+
+/* ── Selected dot ───────────────────────────────────────────────── */
+/*
+  Applied by the RENDERER when State reports a selected dot.
+  Overrides only the stroke; fill stays green so the dot reads as
+  the same object — just highlighted.
+*/
+.dot--selected {
+  stroke:       var(--color-selection);
+  stroke-width: 3;
+  cursor:       pointer;
+}
+
+/* ── Status message ─────────────────────────────────────────────── */
+/*
+  Sits between the controls and the board.
+  Kept visually quiet — it informs without competing with the board.
+*/
+.status {
+  font-size:    0.875rem;
+  color:        var(--color-text-muted);
+  min-height:   1.25em;   /* reserves vertical space so board never jumps */
+  padding-left: 2px;      /* optical alignment with the board edge        */
 }
