@@ -75,7 +75,9 @@ to all use the same engine.
 
 ## Long-term Goal
 
-The browser game is only one client.
+The browser is just one client of Sprouts Lab.
+
+The long-term goal is that the game engine, bots, replay system, and research tools can all operate on the same underlying game model without depending on the browser UI.
 
 The game engine should eventually support:
 
@@ -84,3 +86,4 @@ The game engine should eventually support:
 - bots
 - AI
 - canonical game analysis
+
