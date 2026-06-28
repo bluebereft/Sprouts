@@ -12,37 +12,58 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
 - Self-play
 - AI strategy discovery
 
+## Development Principles
+
+- Build one small feature at a time.
+- Keep the architecture modular.
+- Separate UI, rendering, state and engine.
+- Prefer simple solutions over premature optimisation.
+- Every version should leave the project in a working state.
+
 ---
 
 ## Phase 1 - Browser Game
 
 ### v0.1 ✅
+- Initial board
 - Draw starting dots
 
-### v0.2
-- Select dots
+### v0.2 ✅
+- Dot selection
+- Renderer optimisation (no redraw/flicker)
+- Visual design refresh
+- Modular JavaScript architecture
 
 ### v0.3
-- Draw lines between selected dots
+- Introduce Move model
+- Two-endpoint selection
+- Move creation
+- Selection UX refinement
+- Debug move list
 
 ### v0.4
+- Draw move paths
+- Draw inserted Sprouts dot
+- Support loop moves
+
+### v0.5
 - Player turns
 - Player colours
 - Turn indicator
 
-### v0.5
-- Introduce game engine
-
 ### v0.6
-- Degree (max 3 lines) rule
+- Introduce game engine
+- Legal move framework
 
 ### v0.7
-- Crossing detection
+- Degree (max 3 lines) rule
 
 ### v0.8
-- Save / Load games
+- Crossing detection
+- Region tracking
 
 ### v0.9
+- Save / Load games
 - Replay games
 
 ### v1.0

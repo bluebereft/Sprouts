@@ -1,4 +1,5 @@
 # Sprouts Lab Design
+Last updated: v0.3.1
 
 ## Philosophy
 
@@ -7,6 +8,16 @@ Keep the code simple.
 Every version should add one idea.
 
 The project should remain understandable by a single developer.
+
+---
+
+## Development Principles
+
+- Build one small feature at a time.
+- Keep the project working after every version.
+- Separate game concepts from presentation.
+- Prefer simple solutions over premature optimisation.
+- Refactor when it improves clarity.
 
 ---
 
@@ -40,6 +51,19 @@ It should not know how anything is drawn.
 
 ---
 
+### Models
+
+Represent the core concepts of Sprouts.
+
+Examples include:
+
+- Dot
+- Move
+
+Models should not know about HTML, SVG or rendering.
+
+---
+
 ### Renderer
 
 Draws the board.
@@ -60,6 +84,18 @@ It should not enforce game rules.
 
 Determines whether moves are legal.
 
+The engine owns the rules of Sprouts.
+
+It should not know about HTML, SVG or user interaction.
+
+The same engine should support:
+
+- browser play
+- replay
+- bots
+- AI
+- command-line testing
+
 The engine should not know about HTML or SVG.
 
 This will allow:
@@ -77,14 +113,12 @@ to all use the same engine.
 
 The browser is just one client of Sprouts Lab.
 
-The long-term goal is that the game engine, bots, replay system, and research tools can all operate on the same underlying game model without depending on the browser UI.
+The long-term goal is that the game engine, bots, replay system and research tools all operate on the same underlying game model.
 
-The game engine should eventually support:
+---
 
-- browser interface
-- replay viewer
-- bots
-- AI
-- canonical game analysis
+## Core Principle
 
-The game state stores game concepts, not visual concepts. For example, it stores dots and moves, but never SVG elements or colours.
+The game state stores game concepts, not visual concepts.
+
+For example, it stores dots and moves, but never SVG elements, colours or animations.
