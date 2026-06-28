@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sprouts</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ─── Page wrapper ─────────────────────────────────────────── -->
+  <div class="page">
+
+    <!-- ─── Card ─────────────────────────────────────────────────── -->
+    <div class="card">
+
+      <!-- Title -->
+      <h1 class="title">Sprouts</h1>
+
+      <!-- ─── Controls bar ──────────────────────────────────────── -->
+      <div class="controls">
+
+        <!-- Dropdown: how many starting dots? -->
+        <label class="control-label" for="dot-count">Starting dots</label>
+        <select id="dot-count" class="select">
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+        </select>
+
+        <!-- Start button -->
+        <button id="start-btn" class="btn-primary">Start Game</button>
+
+      </div>
+      <!-- /controls -->
+
+      <!-- ─── Board ─────────────────────────────────────────────── -->
+      <!--
+        The SVG acts as the game board.
+        Width and height are set here; the JS renderer uses these values.
+        All game graphics are drawn inside this element.
+      -->
+      <svg
+        id="board"
+        class="board"
+        width="700"
+        height="500"
+        viewBox="0 0 700 500"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <!-- Dots and curves will be injected here by renderer.js -->
+      </svg>
+      <!-- /board -->
+
+    </div>
+    <!-- /card -->
+
+  </div>
+  <!-- /page -->
+
+  <!-- game.js is loaded last so the DOM is ready when it runs -->
+  <script src="game.js"></script>
+
+</body>
+</html>
