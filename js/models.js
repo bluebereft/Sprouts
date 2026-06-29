@@ -1,14 +1,17 @@
 /* ================================================================
-   models.js — Sprouts v0.3.0
-   
+   models.js — Sprouts v0.5
+
    Responsibility
    ──────────────
-   Define the data shapes used throughout the application.
+   Defines shared data factory functions used across the application.
    This file has no knowledge of the DOM, SVG, or game rules.
-   It is the single place to look when asking "what does a Dot
-   look like?" or "what does a Move look like?".
-   
-   Load order: first. No dependencies.
+
+   Currently defines:
+     createDot — used by selectionState.js and the engine layer.
+
+   Note: the Move model lives in engine/move.js because a Move is
+   a pure engine concept. createDot lives here because dots are
+   shared between the UI layer (layout) and the engine (game state).
    ================================================================ */
 
 
@@ -40,29 +43,4 @@ export function createDot(id, x, y) {
     y,
     lives: 3,   // standard Sprouts starting value
   };
-}
-
-
-/**
- * Creates a Move data object.
- *
- * A Move records a player's intention to connect two dots.
- * It carries only the endpoint dot ids — no geometry, no validation.
- * The game engine (a future module) will interpret moves; this model
- * is deliberately thin.
- *
- * Note: startDotId and endDotId may be the same value. In Sprouts a
- * player may draw a loop from a dot back to itself.
- *
- * Fields
- * ──────
- * startDotId  {number}  Id of the first selected dot.
- * endDotId    {number}  Id of the second selected dot.
- *
- * @param {number} startDotId
- * @param {number} endDotId
- * @returns {{ startDotId: number, endDotId: number }}
- */
-function createMove(startDotId, endDotId) {
-  return { startDotId, endDotId };
 }

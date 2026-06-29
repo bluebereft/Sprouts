@@ -1,5 +1,5 @@
  /* ================================================================
-   move.js — Sprouts Engine Layer (v0.4)
+   move.js — Sprouts Engine Layer (v0.5)
 
    Responsibility
    ──────────────
@@ -12,13 +12,18 @@
 /**
  * Creates a Move object from two endpoint dot IDs.
  *
- * @param {number} a - first endpoint dot id
- * @param {number} b - second endpoint dot id
+ * A Move represents a player's intent to connect two dots.
+ * It carries only the endpoint ids — no geometry, no validation.
+ * The reducer (engine/reducer.js) interprets moves; this factory
+ * is deliberately thin.
+ *
+ * Note: startDotId and endDotId may be equal. In Sprouts, a player
+ * may draw a loop from a dot back to itself.
+ *
+ * @param {number} startDotId - first endpoint dot id
+ * @param {number} endDotId   - second endpoint dot id
  * @returns {{ startDotId: number, endDotId: number }}
  */
-export function createMove(a, b) {
-  return {
-    startDotId: a,
-    endDotId: b
-  };
+export function createMove(startDotId, endDotId) {
+  return { startDotId, endDotId };
 }

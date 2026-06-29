@@ -28,13 +28,13 @@
    
    The Create Move button appears only when both endpoints are set.
    
-   Depends on: state.js (State), renderer.js (Renderer)
-   Load order: after renderer.js.
+   Depends on: selectionState.js, boardView.js, renderer.js, engine/
    ================================================================ */
 
 import { createMove } from './engine/move.js';
 import Engine from './engine/engine.js';
-import State from './engine/state.js';
+import SelectionState from './selectionState.js';
+import BoardView from './boardView.js';
 import Renderer from './renderer.js';
 
 const UI = (() => {
@@ -58,8 +58,8 @@ const UI = (() => {
    * endpoint slots are filled.
    */
   function syncCreateMoveButton() {
-    const ready = State.getFirstSelectedDotId()  !== null
-               && State.getSecondSelectedDotId() !== null;
+    const ready = SelectionState.getFirstSelectedDotId()  !== null
+               && SelectionState.getSecondSelectedDotId() !== null;
     // Toggle a CSS class rather than display:none so the button
     // occupies no layout space when hidden (btn--hidden uses display:none).
     createMoveBtn.classList.toggle('btn--hidden', !ready);
@@ -104,39 +104,39 @@ const UI = (() => {
     const clickedId = parseInt(dotIdAttr, 10);
 
     // Snapshot current state before any mutation.
-    const prevFirst  = State.getFirstSelectedDotId();
-    const prevSecond = State.getSecondSelectedDotId();
+    const prevFirst  = SelectionState.getFirstSelectedDotId();
+    const prevSecond = SelectionState.getSecondSelectedDotId();
 
         if (prevFirst === null) {
-        State.selectFirst(clickedId);
+        SelectionState.selectFirst(clickedId);
         setStatus('Select second endpoint.');
 
         } else if (clickedId === prevFirst) {
         if (prevSecond !== null) {
-            State.promoteSecondToFirst();
+            SelectionState.promoteSecondToFirst();
             setStatus('Select second endpoint.');
         } else {
-            State.clearFirst();
+            SelectionState.clearFirst();
             setStatus('Select first endpoint.');
         }
 
         } else if (prevSecond === null) {
-        State.selectSecond(clickedId);
+        SelectionState.selectSecond(clickedId);
         setStatus('Ready to create move.');
 
         } else if (clickedId === prevSecond) {
-        State.clearSecond();
+        SelectionState.clearSecond();
         setStatus('Select second endpoint.');
 
         } else {
-        State.selectSecond(clickedId);
+        SelectionState.selectSecond(clickedId);
         setStatus('Ready to create move.');
         }
 
     // ── Renderer sync ────────────────────────────────────────────
     Renderer.updateSelection(
       { first: prevFirst,                   second: prevSecond },
-      { first: State.getFirstSelectedDotId(), second: State.getSecondSelectedDotId() }
+      { first: SelectionState.getFirstSelectedDotId(), second: SelectionState.getSecondSelectedDotId() }
     );
 
     syncCreateMoveButton();
@@ -149,25 +149,43 @@ const UI = (() => {
      * applies it to the engine, then updates UI.
      */
     function handleCreateMove() {
-    if (State.getFirstSelectedDotId() === null) return;
-    if (State.getSecondSelectedDotId() === null) return;
+    if (SelectionState.getFirstSelectedDotId() === null) return;
+    if (SelectionState.getSecondSelectedDotId() === null) return;
 
     // ── 1. Capture selection ───────────────────────────────
-    const a = State.getFirstSelectedDotId();
-    const b = State.getSecondSelectedDotId();
+    const a = SelectionState.getFirstSelectedDotId();
+    const b = SelectionState.getSecondSelectedDotId();
 
     const prevFirst = a;
     const prevSecond = b;
 
-    // ── 2. Create MOVE (engine domain object) ──────────────
+    // ── 2. Create move (engine domain object) ─────────────
     const move = createMove(a, b);
 
-    // ── 3. Apply ENGINE transition (single source of truth) ─
-    const state = Engine.apply(move);
-    Renderer.renderEdges(state);
-    State.clearSelections();   // missing piece
-    
-    // ── 4. Clear UI selection visuals ───────────────────────
+    // ── 3. Compute new sprout position ─────────────────────
+    // Temporary placeholder: midpoint between the two endpoints.
+    // In v0.4 this will be replaced by a point on the player-drawn
+    // curve path. BoardView stores it; the engine never sees it.
+    const posA = BoardView.getDotPosition(a);
+    const posB = BoardView.getDotPosition(b);
+    const midX = (posA.x + posB.x) / 2;
+    const midY = (posA.y + posB.y) / 2;
+
+    // ── 4. Apply engine transition ─────────────────────────
+    const engineState = Engine.apply(move);
+
+    // ── 5. Register new dot position in BoardView ──────────
+    // The engine assigned the new dot id as (nextDotId - 1) after
+    // incrementing. Read it back from the returned state.
+    const newDot = engineState.dots[engineState.dots.length - 1];
+    BoardView.setDotPosition(newDot.id, midX, midY);
+
+    // ── 6. Draw the new dot and edges ──────────────────────
+    Renderer.addDot(newDot, engineState.dots.length - 1);
+    Renderer.renderEdges(engineState);
+    SelectionState.clearSelections();
+
+    // ── 7. Clear UI selection visuals ──────────────────────
     Renderer.updateSelection(
         { first: prevFirst, second: prevSecond },
         { first: null, second: null }
@@ -189,16 +207,20 @@ const UI = (() => {
     const boardW = parseFloat(board.getAttribute('width'));
     const boardH = parseFloat(board.getAttribute('height'));
 
-    State.initDots(count, boardW, boardH);
+    SelectionState.initDots(count, boardW, boardH);
+
+    // Reset the board's visual state and register initial dot positions.
+    // BoardView must be populated before Renderer.initBoard() is called,
+    // because the renderer reads positions from BoardView, not the engine.
+    BoardView.reset();
+    SelectionState.getDots().forEach(dot => {
+      BoardView.setDotPosition(dot.id, dot.x, dot.y);
+    });
 
     Renderer.initBoard(board);
 
-    /**
-     * Engine is initialized ONCE per game start.
-     * UI state is used only as initial snapshot.
-     */
     Engine.init({
-        dots: State.getDots(),
+        dots: SelectionState.getDots().map(({ id, lives }) => ({ id, lives })),
         edges: [],
         nextDotId: count,
         moves: []

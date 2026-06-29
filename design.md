@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.3.1
+Last updated: v0.5
 
 ## Philosophy
 
@@ -23,21 +23,23 @@ The project should remain understandable by a single developer.
 
 ## Architecture
 
-UI
+```
+UI  (ui.js)
+ │
+ ├── SelectionState  (selectionState.js)   — UI interaction state only
+ │
+ ├── Engine          (engine/engine.js)    — stateful wrapper
+ │    └── Reducer    (engine/reducer.js)   — pure game state transitions
+ │
+ └── Renderer        (renderer.js)         — SVG board
+      └── SVG
+```
 
-↓
+The engine layer contains only pure game logic.
+It has no knowledge of the DOM, SVG, or UI interaction.
 
-State
-
-↓
-
-Renderer
-
-↓
-
-SVG
-
-The game engine will be introduced later.
+The browser is one client of the engine.
+The same engine will eventually support replay, bots, and AI.
 
 ---
 
