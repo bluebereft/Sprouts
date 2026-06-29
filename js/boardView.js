@@ -11,23 +11,23 @@
 
      • The screen position of every dot  (Map<dotId, {x, y}>)
      • The SVG path of every edge        (Map<moveIndex, pathString>)
-     • The player who made each move     (Map<moveIndex, player>)
-     • The player who created each dot   (Map<dotId, player>)
-
-   Player is 0 or 1. Initial dots have no player (null) — they are
-   neutral territory. Dots and edges created by a move inherit the
-   player who made that move, for colouring purposes only.
 
    boardView is a browser-only concept. It does not exist in
    command-line, bot, or AI contexts. Multiple clients playing the
    same game would each maintain their own boardView.
 
+   Player ownership is NOT stored here. Which player made a given
+   move is derivable from the move index via engine/rules.js
+   (playerForMove). Storing it here would duplicate game knowledge
+   that the engine already encodes implicitly through currentPlayer
+   and the ordered move history.
+
    How it grows with the project
    ──────────────────────────────
-   v0.5  dot positions only (set from initial layout)
-   v0.4  edge paths added (set from player-drawn curves)
-   v0.9  replay cursor; positions populated from saved path data
-   AI    boardView not instantiated (engine runs headlessly)
+   v0.6.1  dot positions only (set from initial layout + moves)
+   v0.7    edge paths added (set from player-drawn curves)
+   v0.9    replay cursor; positions populated from saved path data
+   AI      boardView not instantiated (engine runs headlessly)
 
    Renderer reads from boardView for all spatial data.
    The engine never receives or returns coordinates.
@@ -36,18 +36,14 @@
 const BoardView = (() => {
 
   // Map<dotId: number, {x: number, y: number}>
+  // Screen position of each dot. Set on game start for initial dots,
+  // and after each move for the newly created sprout dot.
   let dotPositions = new Map();
 
   // Map<moveIndex: number, svgPath: string>
+  // The SVG path string representing the drawn curve for each move.
+  // Populated in v0.7 when path drawing is introduced.
   let edgePaths = new Map();
-
-  // Map<moveIndex: number, player: 0|1>
-  // Which player made each move. Used to colour edges.
-  let movePlayers = new Map();
-
-  // Map<dotId: number, player: 0|1|null>
-  // Which player created each dot. null for initial dots (neutral).
-  let dotPlayers = new Map();
 
   // ── Lifecycle ──────────────────────────────────────────────────
 
@@ -57,16 +53,12 @@ const BoardView = (() => {
   function reset() {
     dotPositions = new Map();
     edgePaths    = new Map();
-    movePlayers  = new Map();
-    dotPlayers   = new Map();
   }
 
   // ── Dot positions ──────────────────────────────────────────────
 
   /**
    * Records the screen position of a dot.
-   * Called on game start for each initial dot, and after each move
-   * for the newly created sprout dot.
    *
    * @param {number} dotId
    * @param {number} x
@@ -90,7 +82,7 @@ const BoardView = (() => {
 
   /**
    * Records the SVG path string for a move's drawn curve.
-   * Called by ui.js after the player completes a path (v0.4+).
+   * Called by ui.js after the player completes a path (v0.7+).
    *
    * @param {number} moveIndex — 0-based index into Engine.getState().moves
    * @param {string} svgPath   — SVG path data string, e.g. "M 100 200 C ..."
@@ -101,55 +93,12 @@ const BoardView = (() => {
 
   /**
    * Returns the SVG path string for a move, or null if not set.
-   * Returns null for moves where path drawing is not yet implemented.
    *
    * @param {number} moveIndex
    * @returns {string | null}
    */
   function getEdgePath(moveIndex) {
     return edgePaths.get(moveIndex) ?? null;
-  }
-
-  // ── Player tracking ────────────────────────────────────────────
-
-  /**
-   * Records which player made a move.
-   * Called by ui.js immediately before Engine.apply().
-   *
-   * @param {number} moveIndex — 0-based index of the move
-   * @param {0|1}    player
-   */
-  function setMovePlayer(moveIndex, player) {
-    movePlayers.set(moveIndex, player);
-  }
-
-  /**
-   * Returns the player who made a move, or null.
-   * @param {number} moveIndex
-   * @returns {0|1|null}
-   */
-  function getMovePlayer(moveIndex) {
-    return movePlayers.get(moveIndex) ?? null;
-  }
-
-  /**
-   * Records which player created a dot.
-   * Pass null for initial dots (they are neutral).
-   *
-   * @param {number}   dotId
-   * @param {0|1|null} player
-   */
-  function setDotPlayer(dotId, player) {
-    dotPlayers.set(dotId, player);
-  }
-
-  /**
-   * Returns the player who created a dot, or null for initial dots.
-   * @param {number} dotId
-   * @returns {0|1|null}
-   */
-  function getDotPlayer(dotId) {
-    return dotPlayers.get(dotId) ?? null;
   }
 
   // ── Public API ─────────────────────────────────────────────────
@@ -160,10 +109,6 @@ const BoardView = (() => {
     getDotPosition,
     setEdgePath,
     getEdgePath,
-    setMovePlayer,
-    getMovePlayer,
-    setDotPlayer,
-    getDotPlayer,
   };
 
 })();

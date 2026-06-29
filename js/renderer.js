@@ -6,23 +6,23 @@
    Create, maintain, and update all SVG elements on the board.
    This is the only module that writes to the SVG DOM.
 
-   Renderer reads from two sources:
-     • SelectionState — which dots are highlighted
-     • BoardView      — dot positions, edge paths, player colours
+   Renderer reads from three sources:
+     • SelectionState    — which dots are highlighted
+     • BoardView         — dot positions and edge paths
+     • engine/rules.js   — playerForMove(), to derive edge colours
 
-   It never reads from the engine directly and never mutates state.
+   Player ownership is derived from move index via the engine rules,
+   not stored in BoardView. This keeps game knowledge in the engine
+   and visual data in BoardView, with no overlap.
 
-   v0.6.1 additions
-   ──────────────
-   • data-player attribute stamped on dots and edges for CSS colouring.
-   • syncDotStates(engineState) updates exhausted dot appearance after
-     each move without recreating elements.
+   It never mutates game state and never reads HTML controls.
 
-   Depends on: selectionState.js, boardView.js
+   Depends on: selectionState.js, boardView.js, engine/rules.js
    ================================================================ */
 
 import SelectionState from './selectionState.js';
 import BoardView from './boardView.js';
+import { playerForMove } from './engine/rules.js';
 
 const Renderer = (() => {
 
@@ -66,17 +66,21 @@ const Renderer = (() => {
   }
 
   /**
-   * Creates one <circle> for a dot, registers it, stamps data-player.
+   * Creates one <circle> for a dot and registers it.
    * Position is read from BoardView.
+   * player is passed explicitly — null for initial dots (neutral).
+   *
+   * @param {SVGElement}  board
+   * @param {object}      dot     — engine dot { id, lives }
+   * @param {number}      index   — array index for animation stagger
+   * @param {0|1|null}    player  — null for initial dots
    */
-  function createDotElement(board, dot, index) {
+  function createDotElement(board, dot, index, player = null) {
     const pos = BoardView.getDotPosition(dot.id);
     if (!pos) {
       console.warn(`Renderer: no position registered for dot ${dot.id}`);
       return;
     }
-
-    const player = BoardView.getDotPlayer(dot.id);  // null for initial dots
 
     const circle = document.createElementNS(SVG_NS, 'circle');
     circle.setAttribute('cx', pos.x);
@@ -127,23 +131,25 @@ const Renderer = (() => {
 
   /**
    * Draws a newly created sprout dot.
-   * ui.js calls BoardView.setDotPosition() and BoardView.setDotPlayer()
-   * before calling this.
+   * Called by ui.js after BoardView.setDotPosition() has been set.
+   * player is derived by ui.js via playerForMove() and passed here.
    *
-   * @param {object} dot   — engine dot { id, lives }
-   * @param {number} index — for animation stagger
+   * @param {object}   dot    — engine dot { id, lives }
+   * @param {number}   index  — for animation stagger
+   * @param {0|1|null} player — the player who made this move
    */
-  function addDot(dot, index) {
+  function addDot(dot, index, player) {
     if (!boardEl) return;
-    createDotElement(boardEl, dot, index);
+    createDotElement(boardEl, dot, index, player);
   }
 
   /**
    * Redraws all edge lines from current engine state.
-   * Reads positions from BoardView and player from BoardView.getMovePlayer().
+   * Reads positions from BoardView.
+   * Derives player for each edge from move index via playerForMove().
    *
-   * Edges are indexed by their position in engineState.edges, paired
-   * two-per-move (edges 0,1 → move 0; edges 2,3 → move 1; etc.).
+   * Each move produces exactly 2 edges, so:
+   *   moveIndex = Math.floor(edgeIndex / 2)
    *
    * @param {object} engineState
    */
@@ -161,9 +167,11 @@ const Renderer = (() => {
         return;
       }
 
-      // Each move produces 2 edges. Move index = floor(edgeIndex / 2).
+      // Derive the player who made this move from the move index.
+      // playerForMove is a pure engine rule — the renderer consumes
+      // it but does not own it.
       const moveIndex = Math.floor(edgeIndex / 2);
-      const player    = BoardView.getMovePlayer(moveIndex);
+      const player    = playerForMove(moveIndex);
 
       drawLine(posA.x, posA.y, posB.x, posB.y, player);
     });
@@ -189,7 +197,6 @@ const Renderer = (() => {
    * @param {{ first: number|null, second: number|null }} next
    */
   function updateSelection(prev, next) {
-    const engineState = null;  // not available here — use stored lives if needed
     const touched = new Set([prev.first, prev.second, next.first, next.second]);
     touched.delete(null);
     // Re-derive exhausted state from the circleEl's existing class.

@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.6.1
+Last updated: v0.6.1 (rules.js refactor)
 
 ## Philosophy
 
@@ -70,13 +70,14 @@ The browser's visual representation of the current game. A browser-only
 concept — it does not exist in command-line, bot, or AI contexts.
 
 Stores everything the renderer needs that the engine does not know:
-- Screen position of every dot (set from layout on game start; set from
-  drawn path midpoint after each move)
+- Screen position of every dot
 - SVG path data for each move's drawn curve (v0.7+)
-- Which player created each dot and made each move (for colouring)
 
-The engine never receives or returns coordinates. Dot positions and edge
-geometry are entirely boardView's responsibility.
+Player ownership is NOT stored here. Which player made a given move is
+derivable from the move index via `engine/rules.js (playerForMove)`.
+Storing it in boardView would duplicate game knowledge that the engine
+already encodes implicitly through `currentPlayer` and the ordered move
+history.
 
 ---
 
@@ -94,6 +95,8 @@ the UI layer (layout) and the engine (game state).
 ### Engine (`js/engine/`)
 
 The engine owns mathematical game state and the rules of Sprouts.
+
+**`rules.js`** — pure game rule functions. Currently exports `playerForMove(moveIndex)`. Future home for `isMoveLegal`, `isExhausted`, and `hasLegalMoves`. Any module that needs to ask a question about the rules of Sprouts imports from here — including the renderer, which uses `playerForMove` to colour edges without owning the rule itself.
 
 **`engine.js`** — stateful wrapper. Holds the current engine state and
 exposes `init(state)`, `apply(move)`, and `getState()`.

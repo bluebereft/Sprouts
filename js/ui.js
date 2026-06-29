@@ -33,6 +33,7 @@
    ================================================================ */
 
 import { createMove } from './engine/move.js';
+import { playerForMove } from './engine/rules.js';
 import Engine from './engine/engine.js';
 import SelectionState from './selectionState.js';
 import BoardView from './boardView.js';
@@ -191,22 +192,26 @@ const UI = (() => {
     const midX = (posA.x + posB.x) / 2;
     const midY = (posA.y + posB.y) / 2;
 
-    // ── 4. Record player in BoardView before engine applies ─
-    // currentPlayer is still the acting player at this point.
-    const actingPlayer  = Engine.getState().currentPlayer;
-    const moveIndex     = Engine.getState().moves.length;  // 0-based index of this move
-    BoardView.setMovePlayer(moveIndex, actingPlayer);
+    // ── 4. Derive acting player from move index ─────────────
+    // playerForMove is a pure engine rule. The move index is the
+    // current length of state.moves before this move is applied.
+    const moveIndex    = Engine.getState().moves.length;
+    const actingPlayer = playerForMove(moveIndex);
 
     // ── 5. Apply engine transition ─────────────────────────
     const engineState = Engine.apply(move);
 
-    // ── 6. Register new dot position and player in BoardView
+    // ── 6. Register new dot position in BoardView ───────────
+    // Player ownership is not stored in BoardView — it is always
+    // derivable from move index via playerForMove().
     const newDot = engineState.dots[engineState.dots.length - 1];
     BoardView.setDotPosition(newDot.id, midX, midY);
-    BoardView.setDotPlayer(newDot.id, actingPlayer);
 
     // ── 7. Draw the new sprout dot ─────────────────────────
-    Renderer.addDot(newDot, engineState.dots.length - 1);
+    // Pass actingPlayer so the renderer can stamp data-player on
+    // the new circle. Player derivation stays in rules.js; the
+    // renderer just applies the value it receives.
+    Renderer.addDot(newDot, engineState.dots.length - 1, actingPlayer);
 
     // ── 8. Clear selection state and visuals first ──────────
     // Selection must be cleared before syncDotStates() runs.

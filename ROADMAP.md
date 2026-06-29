@@ -66,8 +66,10 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
 - Turn indicator pill in controls bar
 - Degree rule (UI layer) — exhausted dots (lives = 0) cannot be selected
 - `dot--exhausted` visual state — muted, `pointer-events: none`
-- Lives bug fixes — new sprout dots correctly start with 1 life (not 3); self-loops correctly consume 2 lives from endpoint
-- Player tracking added to `boardView` — `movePlayers` and `dotPlayers` maps
+- Lives bug fixes — new sprout dots correctly start with 1 life; self-loops consume 2 lives
+- `engine/rules.js` introduced — canonical home for pure game rule functions
+- `playerForMove(moveIndex)` — player alternation rule lives in the engine, not in BoardView
+- Player ownership removed from `boardView.js` — derived from move index on demand
 
 ---
 
