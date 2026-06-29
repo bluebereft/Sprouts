@@ -1,6 +1,6 @@
 /* ================================================================
-   ui.js — Sprouts v0.3.0
-   
+   ui.js — Sprouts v0.6.1
+
    Responsibility
    ──────────────
    Own every interaction between the user and the application:
@@ -10,11 +10,12 @@
      • Showing / hiding the Create Move button.
      • Writing status messages to the #status element.
      • Updating the debug move list below the board.
-   
+     • Updating the turn indicator after each move.
+
    UI is the only module that reads HTML elements directly.
    All human-readable strings live here.
-   
-   v0.3.0 click logic
+
+   v0.6.1 click logic
    ───────────────────
    State tracks two independent endpoint slots: first and second.
    
@@ -40,9 +41,10 @@ import Renderer from './renderer.js';
 const UI = (() => {
 
   // ── Cached element references (set in init) ────────────────────
-  let statusEl      = null;
-  let createMoveBtn = null;
-  let moveListEl    = null;
+  let statusEl         = null;
+  let createMoveBtn    = null;
+  let moveListEl       = null;
+  let turnIndicatorEl  = null;
 
   // ── Status helpers ─────────────────────────────────────────────
 
@@ -51,6 +53,18 @@ const UI = (() => {
    */
   function setStatus(msg) {
     if (statusEl) statusEl.textContent = msg;
+  }
+
+  /**
+   * Updates the turn indicator to show whose turn it is.
+   * Sets data-player on the element so CSS handles the colour.
+   *
+   * @param {0|1} player
+   */
+  function updateTurnIndicator(player) {
+    if (!turnIndicatorEl) return;
+    turnIndicatorEl.dataset.player = player;
+    turnIndicatorEl.textContent = `Player ${player + 1}'s turn`;
   }
 
   /**
@@ -102,6 +116,15 @@ const UI = (() => {
     if (dotIdAttr === undefined) return;   // clicked empty board space
 
     const clickedId = parseInt(dotIdAttr, 10);
+
+    // ── Lives guard ───────────────────────────────────────────────
+    // Prevent selecting exhausted dots. This is a UI courtesy — the
+    // engine will enforce legality properly in v0.8.
+    const engineState = Engine.getState();
+    if (engineState) {
+      const dot = engineState.dots.find(d => d.id === clickedId);
+      if (dot && dot.lives === 0) return;
+    }
 
     // Snapshot current state before any mutation.
     const prevFirst  = SelectionState.getFirstSelectedDotId();
@@ -163,36 +186,50 @@ const UI = (() => {
     const move = createMove(a, b);
 
     // ── 3. Compute new sprout position ─────────────────────
-    // Temporary placeholder: midpoint between the two endpoints.
-    // In v0.4 this will be replaced by a point on the player-drawn
-    // curve path. BoardView stores it; the engine never sees it.
     const posA = BoardView.getDotPosition(a);
     const posB = BoardView.getDotPosition(b);
     const midX = (posA.x + posB.x) / 2;
     const midY = (posA.y + posB.y) / 2;
 
-    // ── 4. Apply engine transition ─────────────────────────
+    // ── 4. Record player in BoardView before engine applies ─
+    // currentPlayer is still the acting player at this point.
+    const actingPlayer  = Engine.getState().currentPlayer;
+    const moveIndex     = Engine.getState().moves.length;  // 0-based index of this move
+    BoardView.setMovePlayer(moveIndex, actingPlayer);
+
+    // ── 5. Apply engine transition ─────────────────────────
     const engineState = Engine.apply(move);
 
-    // ── 5. Register new dot position in BoardView ──────────
-    // The engine assigned the new dot id as (nextDotId - 1) after
-    // incrementing. Read it back from the returned state.
+    // ── 6. Register new dot position and player in BoardView
     const newDot = engineState.dots[engineState.dots.length - 1];
     BoardView.setDotPosition(newDot.id, midX, midY);
+    BoardView.setDotPlayer(newDot.id, actingPlayer);
 
-    // ── 6. Draw the new dot and edges ──────────────────────
+    // ── 7. Draw the new sprout dot ─────────────────────────
     Renderer.addDot(newDot, engineState.dots.length - 1);
-    Renderer.renderEdges(engineState);
-    SelectionState.clearSelections();
 
-    // ── 7. Clear UI selection visuals ──────────────────────
+    // ── 8. Clear selection state and visuals first ──────────
+    // Selection must be cleared before syncDotStates() runs.
+    // dotClass() checks SelectionState — if the endpoint dots
+    // are still marked as selected when syncDotStates() fires,
+    // the selected class wins the priority check and the
+    // exhausted class is never applied.
+    SelectionState.clearSelections();
     Renderer.updateSelection(
         { first: prevFirst, second: prevSecond },
         { first: null, second: null }
     );
 
+    // ── 9. Sync exhausted states and redraw edges ───────────
+    // Now that selection is clear, syncDotStates correctly
+    // applies dot--exhausted to any dot with 0 lives.
+    Renderer.syncDotStates(engineState);
+    Renderer.renderEdges(engineState);
+
+    // ── 10. Update turn indicator and status ───────────────
+    updateTurnIndicator(engineState.currentPlayer);
     syncCreateMoveButton();
-    setStatus('Move created. Select first endpoint.');
+    setStatus('Select first endpoint.');
     renderMoveList();
     }
 
@@ -220,12 +257,14 @@ const UI = (() => {
     Renderer.initBoard(board);
 
     Engine.init({
-        dots: SelectionState.getDots().map(({ id, lives }) => ({ id, lives })),
-        edges: [],
-        nextDotId: count,
-        moves: []
+        dots:          SelectionState.getDots().map(({ id, lives }) => ({ id, lives })),
+        edges:         [],
+        nextDotId:     count,
+        moves:         [],
+        currentPlayer: 0,
     });
 
+    updateTurnIndicator(0);
     syncCreateMoveButton();
     setStatus('Select first endpoint.');
     renderMoveList();
@@ -240,11 +279,12 @@ const UI = (() => {
     const startBtn = document.getElementById('start-btn');
     const select   = document.getElementById('dot-count');
     const board    = document.getElementById('board');
-    statusEl       = document.getElementById('status');
-    createMoveBtn  = document.getElementById('create-move-btn');
-    moveListEl     = document.getElementById('move-list');
+    statusEl        = document.getElementById('status');
+    createMoveBtn   = document.getElementById('create-move-btn');
+    moveListEl      = document.getElementById('move-list');
+    turnIndicatorEl = document.getElementById('turn-indicator');
 
-    if (!startBtn || !select || !board || !statusEl || !createMoveBtn || !moveListEl) {
+    if (!startBtn || !select || !board || !statusEl || !createMoveBtn || !moveListEl || !turnIndicatorEl) {
       console.error('Sprouts: required DOM elements are missing.');
       return;
     }

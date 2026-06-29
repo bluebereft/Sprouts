@@ -1,5 +1,5 @@
 /* ================================================================
-   renderer.js — Sprouts v0.5
+   renderer.js — Sprouts v0.6.1
 
    Responsibility
    ──────────────
@@ -7,19 +7,16 @@
    This is the only module that writes to the SVG DOM.
 
    Renderer reads from two sources:
-     • SelectionState — which dots are currently highlighted
-     • BoardView      — where each dot is on screen; edge paths
+     • SelectionState — which dots are highlighted
+     • BoardView      — dot positions, edge paths, player colours
 
    It never reads from the engine directly and never mutates state.
 
-   Design — retained element architecture
-   ───────────────────────────────────────
-   SVG circles are created once per game in initBoard() and kept
-   alive in the DOM for the entire game. Only CSS classes change
-   on selection updates — no elements are recreated.
-
-   Edge lines are redrawn in full after each move via renderEdges().
-   In v0.4 these will become SVG paths drawn by the player.
+   v0.6.1 additions
+   ──────────────
+   • data-player attribute stamped on dots and edges for CSS colouring.
+   • syncDotStates(engineState) updates exhausted dot appearance after
+     each move without recreating elements.
 
    Depends on: selectionState.js, boardView.js
    ================================================================ */
@@ -32,51 +29,45 @@ const Renderer = (() => {
   const SVG_NS     = 'http://www.w3.org/2000/svg';
   const DOT_RADIUS = 8;
 
-  // Map<dotId, SVGCircleElement> — live circle elements, created once
-  // per game and retained for the game's lifetime.
+  // Map<dotId, SVGCircleElement> — retained for the game's lifetime.
   let circleEls = new Map();
 
-  // The <svg> board element. Set in initBoard(), used in renderEdges().
+  // The <svg> board element. Set in initBoard(), used thereafter.
   let boardEl = null;
 
   // ── Private helpers ────────────────────────────────────────────
 
-  /**
-   * Removes all SVG children and clears the element store.
-   * Only called from initBoard() at game start.
-   */
   function clearBoard(board) {
     while (board.firstChild) board.removeChild(board.firstChild);
     circleEls.clear();
   }
 
   /**
-   * Returns the CSS class string for a dot based on current selection.
-   * Both slots are checked so a loop move (same dot twice) is handled.
+   * Computes the full CSS class string for a dot.
+   * Selection overrides exhaustion visually — a selected exhausted
+   * dot shows the selection ring, which is a UI affordance edge case
+   * that will disappear once the lives guard blocks the click.
+   *
+   * @param {number}  dotId
+   * @param {boolean} isExhausted
    */
-  function dotClass(dotId) {
+  function dotClass(dotId, isExhausted = false) {
     const isFirst  = dotId === SelectionState.getFirstSelectedDotId();
     const isSecond = dotId === SelectionState.getSecondSelectedDotId();
-    return (isFirst || isSecond) ? 'dot dot--selected' : 'dot';
+    if (isFirst || isSecond) return 'dot dot--selected';
+    if (isExhausted)         return 'dot dot--exhausted';
+    return 'dot';
   }
 
-  /**
-   * Applies the correct CSS class to a single circle.
-   * No-ops silently if the dot isn't in the store.
-   */
-  function applyDotClass(dotId) {
+  function applyDotClass(dotId, isExhausted = false) {
     if (dotId === null) return;
     const el = circleEls.get(dotId);
-    if (el) el.setAttribute('class', dotClass(dotId));
+    if (el) el.setAttribute('class', dotClass(dotId, isExhausted));
   }
 
   /**
-   * Creates one <circle> for a dot and registers it.
-   * Position is read from BoardView, not from the engine dot object.
-   *
-   * @param {SVGElement} board
-   * @param {object}     dot    — engine dot { id, lives }
-   * @param {number}     index  — array index for animation stagger
+   * Creates one <circle> for a dot, registers it, stamps data-player.
+   * Position is read from BoardView.
    */
   function createDotElement(board, dot, index) {
     const pos = BoardView.getDotPosition(dot.id);
@@ -85,31 +76,40 @@ const Renderer = (() => {
       return;
     }
 
+    const player = BoardView.getDotPlayer(dot.id);  // null for initial dots
+
     const circle = document.createElementNS(SVG_NS, 'circle');
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
     circle.setAttribute('r',  DOT_RADIUS);
-    circle.setAttribute('class', dotClass(dot.id));
+    circle.setAttribute('class', dotClass(dot.id, dot.lives === 0));
     circle.style.setProperty('--dot-index', index);
     circle.dataset.dotId = dot.id;
+
+    // data-player drives CSS colour rules. Absent on neutral initial dots.
+    if (player !== null) circle.dataset.player = player;
+
     board.appendChild(circle);
     circleEls.set(dot.id, circle);
   }
 
   /**
-   * Draws a straight line between two board positions.
-   * Inserted before other children so dots render on top.
+   * Draws a straight line edge, stamped with data-player for CSS colouring.
+   * Inserted before other children so dots always render on top.
+   *
+   * @param {number}   x1, y1, x2, y2
+   * @param {0|1|null} player
    */
-  function drawLine(x1, y1, x2, y2) {
+  function drawLine(x1, y1, x2, y2, player) {
     const line = document.createElementNS(SVG_NS, 'line');
     line.setAttribute('x1', x1);
     line.setAttribute('y1', y1);
     line.setAttribute('x2', x2);
     line.setAttribute('y2', y2);
-    line.setAttribute('stroke', '#4F6D5A');
     line.setAttribute('stroke-width', '2');
     line.setAttribute('stroke-linecap', 'round');
     line.setAttribute('class', 'edge');
+    if (player !== null) line.dataset.player = player;
     boardEl.insertBefore(line, boardEl.firstChild);
   }
 
@@ -117,26 +117,21 @@ const Renderer = (() => {
 
   /**
    * Initialises the board for a new game.
-   * Reads dot positions from BoardView (which ui.js populates first).
-   * Creates one circle per dot; these are stable for the game's lifetime.
-   *
-   * @param {SVGElement} board
+   * ui.js populates BoardView before calling this.
    */
   function initBoard(board) {
     boardEl = board;
     clearBoard(board);
-    // BoardView has already been populated by ui.js before this is called.
-    // We iterate SelectionState.getDots() for the ordered initial list.
     SelectionState.getDots().forEach((dot, index) => createDotElement(board, dot, index));
   }
 
   /**
-   * Draws a new dot on the board for a sprout created by a move.
-   * Called by ui.js after BoardView.setDotPosition() has registered
-   * the new dot's screen coordinates.
+   * Draws a newly created sprout dot.
+   * ui.js calls BoardView.setDotPosition() and BoardView.setDotPlayer()
+   * before calling this.
    *
    * @param {object} dot   — engine dot { id, lives }
-   * @param {number} index — insertion index for animation stagger
+   * @param {number} index — for animation stagger
    */
   function addDot(dot, index) {
     if (!boardEl) return;
@@ -144,27 +139,20 @@ const Renderer = (() => {
   }
 
   /**
-   * Redraws all edge lines from the current engine state.
-   * Reads dot positions exclusively from BoardView.
+   * Redraws all edge lines from current engine state.
+   * Reads positions from BoardView and player from BoardView.getMovePlayer().
    *
-   * All existing edge lines are removed and redrawn. This is safe
-   * because edges are few and edge geometry doesn't change after
-   * a move is committed.
+   * Edges are indexed by their position in engineState.edges, paired
+   * two-per-move (edges 0,1 → move 0; edges 2,3 → move 1; etc.).
    *
-   * In v0.4 this will draw SVG paths (BoardView.getEdgePath) instead
-   * of straight lines.
-   *
-   * @param {object} engineState — current state from Engine.getState()
+   * @param {object} engineState
    */
   function renderEdges(engineState) {
     if (!boardEl) return;
-
-    // Remove existing edge elements before redrawing.
     boardEl.querySelectorAll('.edge').forEach(el => el.remove());
-
     if (!engineState || !Array.isArray(engineState.edges)) return;
 
-    engineState.edges.forEach(edge => {
+    engineState.edges.forEach((edge, edgeIndex) => {
       const posA = BoardView.getDotPosition(edge.a);
       const posB = BoardView.getDotPosition(edge.b);
 
@@ -173,25 +161,49 @@ const Renderer = (() => {
         return;
       }
 
-      drawLine(posA.x, posA.y, posB.x, posB.y);
+      // Each move produces 2 edges. Move index = floor(edgeIndex / 2).
+      const moveIndex = Math.floor(edgeIndex / 2);
+      const player    = BoardView.getMovePlayer(moveIndex);
+
+      drawLine(posA.x, posA.y, posB.x, posB.y, player);
     });
   }
 
   /**
-   * Updates the CSS highlight on exactly the circles that changed.
-   * Receives before/after selection snapshots; touches only the union
-   * of affected dot ids.
+   * Syncs dot appearance after a move — applies exhausted class to
+   * any dot whose lives have reached 0 without recreating elements.
+   *
+   * @param {object} engineState
+   */
+  function syncDotStates(engineState) {
+    if (!engineState || !Array.isArray(engineState.dots)) return;
+    engineState.dots.forEach(dot => {
+      applyDotClass(dot.id, dot.lives === 0);
+    });
+  }
+
+  /**
+   * Updates selection highlight on only the changed circles.
    *
    * @param {{ first: number|null, second: number|null }} prev
    * @param {{ first: number|null, second: number|null }} next
    */
   function updateSelection(prev, next) {
+    const engineState = null;  // not available here — use stored lives if needed
     const touched = new Set([prev.first, prev.second, next.first, next.second]);
     touched.delete(null);
-    touched.forEach(applyDotClass);
+    // Re-derive exhausted state from the circleEl's existing class.
+    // A dot is exhausted if it already has dot--exhausted; selection
+    // temporarily overrides it visually but does not remove the state.
+    touched.forEach(id => {
+      const el = circleEls.get(id);
+      if (!el) return;
+      const wasExhausted = el.getAttribute('class').includes('dot--exhausted');
+      applyDotClass(id, wasExhausted);
+    });
   }
 
-  return { initBoard, addDot, renderEdges, updateSelection };
+  return { initBoard, addDot, renderEdges, syncDotStates, updateSelection };
 
 })();
 

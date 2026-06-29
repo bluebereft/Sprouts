@@ -1,5 +1,5 @@
 /* ================================================================
-   style.css — Sprouts v0.5
+   style.css — Sprouts v0.6.1
    
    Design tokens are declared as CSS custom properties at the top.
    Everything else references those tokens so future reskins are easy.
@@ -63,14 +63,13 @@ body {
   align-items: center;
   justify-content: center;
   padding: var(--space-xl) var(--space-md);
-  /* Slightly loose line-height gives the whole page a calmer feel */
   line-height: 1.5;
 }
 
 /* ── Page layout ────────────────────────────────────────────────── */
 .page {
   width: 100%;
-  max-width: 790px;   /* comfortable margin around the 700px board */
+  max-width: 790px;
 }
 
 /* ── Card ───────────────────────────────────────────────────────── */
@@ -78,7 +77,7 @@ body {
   background: var(--color-card);
   border-radius: var(--card-radius);
   box-shadow: var(--card-shadow);
-  border: 1px solid var(--color-border);   /* hairline keeps the card grounded */
+  border: 1px solid var(--color-border);
   padding: var(--space-xl);
   display: flex;
   flex-direction: column;
@@ -91,8 +90,6 @@ body {
   font-weight: 600;
   letter-spacing: -0.025em;
   color: var(--color-text);
-
-  /* Warm green left-border gives the title a grounded anchor */
   padding-left: var(--space-md);
   border-left: 3px solid var(--color-accent);
 }
@@ -110,26 +107,20 @@ body {
   font-weight: 500;
   color: var(--color-text-muted);
   white-space: nowrap;
-  /* A little breathing room between label and the control beside it */
   margin-right: 4px;
 }
 
 /* ── Dropdown ───────────────────────────────────────────────────── */
-/*
-  Styled to match the button shape (pill, same height, same padding)
-  so the controls bar reads as a unified group.
-*/
 .select {
   appearance: none;
   -webkit-appearance: none;
 
   height: var(--control-height);
-  padding: 0 40px 0 var(--control-px);   /* extra right room for chevron */
+  padding: 0 40px 0 var(--control-px);
   border-radius: var(--control-radius);
   border: 1.5px solid var(--color-border);
   background-color: var(--color-card);
 
-  /* Warm-grey chevron; colour matches --color-text-muted */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237B756E' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 14px center;
@@ -143,9 +134,7 @@ body {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.select:hover {
-  border-color: var(--color-accent);
-}
+.select:hover { border-color: var(--color-accent); }
 
 .select:focus {
   outline: none;
@@ -159,16 +148,13 @@ body {
   padding: 0 var(--control-px);
   border-radius: var(--control-radius);
   border: none;
-
   background: var(--color-accent);
   color: #ffffff;
-
   font-family: var(--font-sans);
   font-size: 0.9375rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-
   transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
 }
 
@@ -177,15 +163,8 @@ body {
   box-shadow: 0 2px 8px rgba(79, 109, 90, 0.25);
 }
 
-.btn-primary:active {
-  transform: scale(0.97);
-  box-shadow: none;
-}
-
-.btn-primary:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(79, 109, 90, 0.3);
-}
+.btn-primary:active  { transform: scale(0.97); box-shadow: none; }
+.btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(79, 109, 90, 0.3); }
 
 /* ── SVG board ──────────────────────────────────────────────────── */
 .board {
@@ -199,17 +178,11 @@ body {
 }
 
 /* ── SVG dot styles ─────────────────────────────────────────────── */
-/*
-  These selectors target SVG <circle> elements injected by the RENDERER.
-  Keeping visual decisions in CSS means the JS never hardcodes colours.
-*/
 .dot {
   fill:         var(--color-dot);
   stroke:       var(--color-dot-stroke);
   stroke-width: 2;
   cursor:       default;
-
-  /* Gentle scale-in on first appearance */
   transform-origin: center;
   animation: dot-appear 0.25s ease-out both;
   animation-delay: calc(var(--dot-index, 0) * 60ms);
@@ -221,11 +194,6 @@ body {
 }
 
 /* ── Selected dot ───────────────────────────────────────────────── */
-/*
-  Applied by the RENDERER when State reports a selected dot.
-  Only stroke changes — fill stays forest green.
-  The muted blue reads as "active" without clashing with the green.
-*/
 .dot--selected {
   stroke:       var(--color-selection);
   stroke-width: 3;
@@ -233,10 +201,6 @@ body {
 }
 
 /* ── Status message ─────────────────────────────────────────────── */
-/*
-  Between controls and board. Quiet — informs without distracting.
-  min-height prevents the board from jumping when text appears.
-*/
 .status {
   font-size:    0.8125rem;
   font-weight:  500;
@@ -247,27 +211,18 @@ body {
 }
 
 /* ── Secondary button (Create Move) ─────────────────────────────── */
-/*
-  Visually distinct from .btn-primary so the two actions have clear
-  hierarchy: Start Game is the dominant action; Create Move is a
-  contextual action that appears only when relevant.
-  Same pill shape and height — same control-token family.
-*/
 .btn-secondary {
   height: var(--control-height);
   padding: 0 var(--control-px);
   border-radius: var(--control-radius);
   border: 1.5px solid var(--color-accent);
-
   background: transparent;
   color: var(--color-accent);
-
   font-family: var(--font-sans);
   font-size: 0.9375rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-
   transition: background 0.15s ease, color 0.15s ease,
               box-shadow 0.15s ease, transform 0.1s ease;
 }
@@ -278,30 +233,13 @@ body {
   box-shadow: 0 2px 8px rgba(79, 109, 90, 0.25);
 }
 
-.btn-secondary:active {
-  transform: scale(0.97);
-  box-shadow: none;
-}
-
-.btn-secondary:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(79, 109, 90, 0.3);
-}
+.btn-secondary:active { transform: scale(0.97); box-shadow: none; }
+.btn-secondary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(79, 109, 90, 0.3); }
 
 /* ── Hidden utility ─────────────────────────────────────────────── */
-/*
-  Removes the element from layout entirely (not just invisible).
-  Toggled by JS via classList.toggle('btn--hidden', ...).
-*/
-.btn--hidden {
-  display: none;
-}
+.btn--hidden { display: none; }
 
 /* ── Move list section ──────────────────────────────────────────── */
-/*
-  Debug view below the board. Intentionally understated — it is
-  diagnostic output for this sprint, not a designed feature.
-*/
 .move-list-section {
   border-top: 1px solid var(--color-border);
   padding-top: var(--space-lg);
@@ -318,7 +256,6 @@ body {
   color: var(--color-text-muted);
 }
 
-/* The ordered list itself — reset browser defaults */
 .move-list__ol {
   list-style: none;
   display: flex;
@@ -330,7 +267,7 @@ body {
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--color-text);
-  font-variant-numeric: tabular-nums;   /* keeps numbers aligned */
+  font-variant-numeric: tabular-nums;
 }
 
 .move-list__empty {
@@ -338,3 +275,61 @@ body {
   color: var(--color-text-muted);
   font-style: italic;
 }
+
+/* ── Player colours ─────────────────────────────────────────────── */
+/*
+  data-player="0" / data-player="1" is stamped by the renderer on
+  dots and edges. CSS does all the colouring; JS never sets colours.
+  Player 0 = forest green. Player 1 = muted blue.
+  Both reuse existing design tokens — no new colours introduced.
+*/
+
+/* Dot player colours */
+.dot[data-player="0"] { fill: var(--color-accent);   }
+.dot[data-player="1"] { fill: var(--color-selection); }
+
+/* Edge player colours */
+.edge                  { stroke: var(--color-accent);   }
+.edge[data-player="0"] { stroke: var(--color-accent);   }
+.edge[data-player="1"] { stroke: var(--color-selection); }
+
+/* ── Exhausted dot ──────────────────────────────────────────────── */
+/*
+  A dot with 0 lives remaining. The entire dot is greyed out —
+  fill, stroke, and opacity — regardless of which player created it.
+  The selector is repeated with player variants to win the specificity
+  battle against .dot[data-player="0"] and .dot[data-player="1"].
+*/
+.dot--exhausted,
+.dot--exhausted[data-player="0"],
+.dot--exhausted[data-player="1"] {
+  fill:           var(--color-border);
+  stroke:         var(--color-text-muted);
+  stroke-width:   1.5;
+  opacity:        0.4;
+  cursor:         not-allowed;
+  pointer-events: none;
+}
+
+/* ── Turn indicator ─────────────────────────────────────────────── */
+/*
+  A pill in the controls bar showing whose turn it is.
+  data-player drives the background colour; text is set by JS.
+*/
+.turn-indicator {
+  height:        var(--control-height);
+  padding:       0 var(--control-px);
+  border-radius: var(--control-radius);
+  display:       flex;
+  align-items:   center;
+  font-family:   var(--font-sans);
+  font-size:     0.875rem;
+  font-weight:   600;
+  color:         #ffffff;
+  white-space:   nowrap;
+  background:    var(--color-text-muted);
+  transition:    background 0.2s ease;
+}
+
+.turn-indicator[data-player="0"] { background: var(--color-accent);   }
+.turn-indicator[data-player="1"] { background: var(--color-selection); }
