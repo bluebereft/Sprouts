@@ -1,5 +1,5 @@
 /* ================================================================
-   style.css — Sprouts v0.6.1
+   style.css — Sprouts v0.7
    
    Design tokens are declared as CSS custom properties at the top.
    Everything else references those tokens so future reskins are easy.
@@ -333,3 +333,43 @@ body {
 
 .turn-indicator[data-player="0"] { background: var(--color-accent);   }
 .turn-indicator[data-player="1"] { background: var(--color-selection); }
+
+/* ── Draw mode (v0.7) ──────────────────────────────────────────── */
+/*
+  Applied to the board while the player is drawing a curve between
+  two selected endpoints. Crosshair cursor signals "you are now
+  drawing" as distinct from the default dot-selection click mode.
+*/
+.board--drawing {
+  cursor: crosshair;
+}
+
+/*
+  The live in-progress curve, shown while the player drags.
+  Lighter and more muted than a committed edge so it visually reads
+  as "not yet final." Uses the current player's colour at reduced
+  opacity rather than a neutral colour, so the preview still gives
+  a sense of which player is drawing.
+*/
+.edge--draft {
+  stroke:         var(--color-text-muted);
+  stroke-width:   2;
+  opacity:        0.6;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+/*
+  Brief flash applied to the board when a drawn curve is rejected
+  (crosses another edge, crosses itself, or doesn't reach the second
+  dot). Gives a clear, momentary visual signal alongside the status
+  message text.
+*/
+@keyframes board-reject-flash {
+  0%, 100% { background: var(--board-bg); }
+  50%      { background: #f3dede; }
+}
+
+.board--rejected {
+  animation: board-reject-flash 0.3s ease-out;
+}

@@ -36,15 +36,6 @@
         <!-- Start button -->
         <button id="start-btn" class="btn-primary">Start Game</button>
 
-        <!--
-          Create Move button.
-          Hidden by default via the btn--hidden class.
-          UI.syncCreateMoveButton() shows it when both endpoints are selected.
-        -->
-        <button id="create-move-btn" class="btn-secondary btn--hidden">
-          Create Move
-        </button>
-
         <!-- Turn indicator. data-player set by ui.js; CSS colours it. -->
         <div id="turn-indicator" class="turn-indicator"></div>
 
@@ -67,7 +58,7 @@
         viewBox="0 0 700 500"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <!-- Dots will be injected here by renderer.js -->
+        <!-- Dots and drawn curves are injected here by renderer.js -->
       </svg>
       <!-- /board -->
 
