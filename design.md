@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.6.1 (rules.js refactor)
+Last updated: v0.7 (in progress)
 
 ## Philosophy
 
@@ -119,7 +119,16 @@ Current engine state shape:
 Note: engine dots have no x or y. Screen coordinates are not part of
 the mathematical game state — they live in boardView.
 
-**`move.js`** — `createMove(startDotId, endDotId)` factory.
+**`move.js`** — `createMove(startDotId, endDotId, regionId = 0)` factory.
+`regionId` identifies which region of the position the curve was drawn
+through (see "Canonical Position Representation" below). Defaults to 0
+since `engine/regions.js` is currently a stub.
+
+**`regions.js`** — pure combinatorial region model. v0.7: a stub —
+`getRegionForDot()` always returns 0, since no move has yet split the
+single starting region. The interface is stable now so v0.9 only needs
+to replace the function body with real region-splitting logic; no other
+file needs to change shape when that happens.
 
 **`canonical.js`**, **`hash.js`** — stubbed, for Phase 2.
 
@@ -176,3 +185,65 @@ The long-term goal is that the game engine, bots, replay system, and
 research tools all operate on the same underlying game model. BoardView
 and the renderer are browser-specific layers on top of an engine that
 knows nothing about screens.
+
+---
+
+## Canonical Position Representation
+
+Before implementing v0.7, we researched published Sprouts implementations
+to confirm what minimal data is needed to recognise two positions as the
+same game state. The key reference is Čížek & Balko, "Implementation of
+Sprouts: A Graph Drawing Game" (Graph Drawing 2021), which independently
+arrives at the same two-layer separation this project already uses:
+
+- A **graphical representation** — pixel/coordinate data, used for
+  rendering and crossing detection. This is BoardView's role here.
+- A **string representation (sr(P))** — a compact, purely combinatorial
+  encoding used for canonical comparison, hashing, and search. This is
+  the future role of `engine/canonical.js`.
+
+Their finding directly relevant to this project: a move is not fully
+described by its two endpoint dots once a position has more than one
+region. The same two dots can be connected through different regions,
+producing different game states. The region a curve passes through is
+part of a move's topological identity, not just its endpoints — which
+is why `engine/move.js` now carries a `regionId` field, even though it's
+a stub value (0) until `engine/regions.js` becomes real at v0.9.
+
+Their canonical string structure, summarised: positions split into
+independent **lands**; each land contains **regions**; each region
+contains one or more **boundaries** (a region can have multiple
+disconnected pieces of graph sitting inside it, e.g. a free dot floating
+in an otherwise-empty region); each boundary is a cyclic sequence of
+vertex visits. This is the target shape for `engine/canonical.js` at v0.9
+— no coordinates anywhere, just vertex identity and boundary structure.
+
+## Drawing Approach (v0.7)
+
+We considered three ways to implement curve drawing:
+
+1. **Pure freehand, retrospective check** — draw normally, validate after
+   release.
+2. **Live-constrained ("guided freehand")** — the curve cannot be drawn
+   past the boundary of the current region; checked continuously during
+   the gesture.
+3. **Template-based guided drawing** — system proposes a pre-shaped legal
+   curve between two clicked dots.
+
+We chose **option 1**. Option 2 would have required a real-time,
+continuously-queryable geometric region boundary (a new browser-side
+module), which is meaningfully more complex than a one-time check after
+the gesture completes, and that complexity is specific to "guided
+freehand" rather than something v0.9 would need anyway. Option 1's
+crossing-check code is identical to what v0.9 will need once real
+regions exist — only what it's checked against changes (a flat edge
+list now, a region boundary later) — so nothing here is throwaway.
+
+This produced two new browser-side pure-geometry files, used by `ui.js`
+but living outside both `engine/` and `boardView.js` since they contain
+no game knowledge and no persistent state:
+
+- **`js/pathSimplify.js`** — Douglas-Peucker simplification of raw
+  pointer-sampled points into a clean curve.
+- **`js/crossingDetection.js`** — segment intersection tests: does a
+  candidate path cross any existing path, or itself.

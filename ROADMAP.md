@@ -73,12 +73,24 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
 
 ---
 
-### v0.7 — Drawn Moves
-- Replace straight-line edges with player-drawn freehand curves
-- Sample pointer into SVG path data
-- Store path in `boardView.setEdgePath()`
-- Place new sprout at correct point along drawn path
-- Engine still receives only `{ startDotId, endDotId }` — no geometry
+### v0.7 — Drawn Moves (in progress)
+- Research: reviewed published Sprouts implementation literature (Čížek &
+  Balko, GD 2021) to confirm canonical position representation requirements
+  before implementing drawing — see design.md for findings
+- Decided against live-constrained ("guided freehand") drawing in favour of
+  simpler freehand-then-validate: draw normally, simplify and check for
+  crossings only after the pointer is released, reject with a message and
+  allow redraw if invalid. Avoids needing a real-time region-boundary query
+  that would otherwise require a throwaway browser-side module.
+- `engine/move.js` — `regionId` field added to Move (defaults to 0) ✅
+- `engine/regions.js` — combinatorial region stub, always returns region 0,
+  ready for real implementation at v0.9 without changing its interface ✅
+- `js/pathSimplify.js` — Douglas-Peucker curve simplification (pure geometry) ✅
+- `js/crossingDetection.js` — segment intersection / path crossing checks
+  (pure geometry); permanent infrastructure, reused unchanged at v0.9 against
+  real region boundaries rather than a flat edge list ✅
+- Remaining: wire pointer-driven drawing into `ui.js`, render real `<path>`
+  curves in `renderer.js`, arc-length sprout placement
 
 ### v0.8 — Engine Rules
 - Enforce lives / degree rule inside the engine (not just UI)
@@ -93,16 +105,21 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
 - Foundation for replay (replay = load + re-apply moves)
 
 ### v0.9 — Topological Model
-- Introduce explicit region, boundary, and edge incidence concepts
-- Engine begins modelling topology rather than just a flat graph
+- Replace `engine/regions.js` stub with real region tracking
+- Region splitting: how a move divides one region into two
+- Boundary structure per region (supports multiple boundaries per region,
+  e.g. a free-floating dot inside a larger region)
+- Canonical encoding inspired by published string representation sr(P):
+  per land → per region → per boundary → cyclic sequence of vertex visits
 - Mathematical representation begins to diverge from browser representation
 - Foundation for canonicalisation and position hashing
 
 ### v1.0 — Fully Playable Sprouts
-- Crossing detection
-- Region splitting on each move
 - Complete legal move generation
 - Game-over detection
+- Crossing detection and region splitting fully integrated into engine rules
+  (geometry-side primitives already exist from v0.7 — `crossingDetection.js`
+  — this version connects them to the real topological model)
 
 ---
 

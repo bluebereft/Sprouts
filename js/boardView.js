@@ -1,5 +1,5 @@
 /* ================================================================
-   boardView.js — Sprouts v0.6.1
+   boardView.js — Sprouts v0.7
 
    Responsibility
    ──────────────
@@ -82,7 +82,8 @@ const BoardView = (() => {
 
   /**
    * Records the SVG path string for a move's drawn curve.
-   * Called by ui.js after the player completes a path (v0.7+).
+   * Called by ui.js after a freehand-drawn curve passes crossing
+   * validation (v0.7) — see js/crossingDetection.js.
    *
    * @param {number} moveIndex — 0-based index into Engine.getState().moves
    * @param {string} svgPath   — SVG path data string, e.g. "M 100 200 C ..."
