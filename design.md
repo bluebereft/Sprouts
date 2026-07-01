@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.8 (engine-enforced legality, validate/apply API split)
+Last updated: v0.8.1 (Node test harness — tests/ mirrors js/ source layout)
 
 ## Philosophy
 
@@ -18,6 +18,41 @@ The project should remain understandable by a single developer.
 - Separate game concepts from presentation.
 - Prefer simple solutions over premature optimisation.
 - Refactor when it improves clarity.
+
+---
+
+## Testing (`tests/`)
+
+Introduced at v0.8.1. Uses Node's built-in `node:test` and
+`node:assert` — zero npm dependencies. Run with `npm test`.
+
+`tests/` mirrors the `js/` source layout exactly:
+`tests/engine/rules.test.js` ↔ `js/engine/rules.js`,
+`tests/engine/engine.test.js` ↔ `js/engine/engine.js`. The test file
+for any source file is always at the same relative path under `tests/`.
+
+Only the pure, zero-DOM layer is covered this way: `engine/rules.js`,
+`engine/engine.js`, `engine/reducer.js`, `engine/move.js`, and
+(candidates, not yet written) `pathSimplify.js`, `crossingDetection.js`.
+`renderer.js`, `ui.js`, `drawInteraction.js`, `boardView.js`, and
+`selectionState.js` all touch the DOM directly and are out of scope for
+this harness — they would need a DOM shim (e.g. jsdom) to run under
+Node, which hasn't been added.
+
+This is a useful validation of the architecture, not just a testing
+convenience: `engine.js` and `rules.js` run and test correctly under
+plain Node with no browser at all, which is exactly the property the
+engine/browser separation (established at v0.5 with BoardView) was
+supposed to guarantee. A future bot or replay system can rely on the
+same modules these tests exercise directly, with no adaptation.
+
+One gotcha worth knowing before adding more engine tests: `Engine`
+(`js/engine/engine.js`) is a module-level singleton — a closed-over
+`let engineState`, not a class instantiated fresh per test. Node
+caches ES module imports within a process, so every `test()` in
+`engine.test.js` shares the same `Engine` instance. Each test must
+call `Engine.init(...)` first to establish a known state before
+asserting anything.
 
 ---
 

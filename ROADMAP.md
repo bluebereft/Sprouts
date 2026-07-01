@@ -173,12 +173,43 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
   `Rules.isExhausted()`); UI-layer guards reframed as interaction
   shortcuts, not independent legality — the engine is the sole source of
   truth and would reject the same move regardless
-- **Known gap:** `DOT_NOT_FOUND` is currently unreachable through normal
-  play (the UI can only ever select existing dots) — verified via direct
-  console calls to `Engine.apply()`/`Engine.validate()` with a
-  deliberately malformed move, same approach used for `pathSimplify`/
-  `crossingDetection` testing. A real test file (`Phase 2` candidate) would
-  remove the need for manual console verification as the rule set grows
+- **Known gap (resolved at v0.8.1):** `DOT_NOT_FOUND` was unreachable
+  through normal play at the time this version shipped (the UI can only
+  ever select existing dots), and was verified via manual console calls to
+  `Engine.apply()`/`Engine.validate()`. v0.8.1 replaces this with a real
+  automated test suite.
+
+### v0.8.1 — Engine Test Harness ✅
+- Installed Node.js LTS (v24.18.0) via `winget install OpenJS.NodeJS.LTS`
+- Minimal `package.json` — `"type": "module"`, `npm test` → `node --test`.
+  Zero npm dependencies: Node's built-in `node:test` and `node:assert`
+  cover everything needed for the pure engine/rules layer
+- `tests/` mirrors `js/` source layout (`tests/engine/rules.test.js` ↔
+  `js/engine/rules.js`, `tests/engine/engine.test.js` ↔
+  `js/engine/engine.js`), so the test file for any source file is always
+  at the same relative path
+- 29 tests, all passing:
+  - `rules.test.js` (18 tests) — `isExhausted`, `playerForMove`, and
+    `validateMove` across existence checks, lives checks, self-loop vs.
+    normal-move mutual exclusivity, and multi-violation reporting
+  - `engine.test.js` (11 tests) — `apply()`'s success path (state update,
+    sprout creation, lives decrement, player toggle) and failure path
+    (violations returned, state left as the exact same object reference
+    via `assert.strictEqual`, no player/move-history advancement on
+    rejection), plus `validate()`'s read-only guarantee and its agreement
+    with `apply()`
+- Only the pure, zero-DOM layer is covered this way by design — `rules.js`,
+  `engine.js`, `reducer.js`, `move.js` (and, not yet tested but equally
+  testable: `pathSimplify.js`, `crossingDetection.js`). `renderer.js`,
+  `ui.js`, `drawInteraction.js`, `boardView.js`, `selectionState.js` all
+  touch the DOM and are out of scope for this harness — validates that the
+  engine/browser separation the architecture has maintained since v0.5
+  actually pays off: these files run and test correctly with no browser at
+  all, exactly as intended for future bots/replay/AI
+- Note: `node --test tests/` (explicit directory argument) failed to
+  discover files on this Node version/setup; `node --test` with no
+  argument (relying on Node's default recursive `**/*.test.js` discovery)
+  works correctly and is what `npm test` now runs
 
 ### v0.8.5 — Save / Load
 - Serialise engine state + boardView paths to JSON
