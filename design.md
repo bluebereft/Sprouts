@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.7.1 (self-loop deselect fix, discoverability hint)
+Last updated: v0.8 (engine-enforced legality, validate/apply API split)
 
 ## Philosophy
 
@@ -103,14 +103,55 @@ the UI layer (layout) and the engine (game state).
 
 The engine owns mathematical game state and the rules of Sprouts.
 
-**`rules.js`** — pure game rule functions. Currently exports `playerForMove(moveIndex)`. Future home for `isMoveLegal`, `isExhausted`, and `hasLegalMoves`. Any module that needs to ask a question about the rules of Sprouts imports from here — including the renderer, which uses `playerForMove` to colour edges without owning the rule itself.
+**`rules.js`** — pure game rule functions. This is the engine's single
+source of truth for legality; any module that needs to ask a question
+about the rules of Sprouts imports from here.
+
+- `playerForMove(moveIndex)` — which player acts on a given move index.
+  Used by the renderer to colour edges without owning the rule itself.
+- `isExhausted(dot)` — whether a dot has no lives remaining. The one
+  definition of exhaustion in the codebase; `ui.js` and `renderer.js`
+  both call this rather than checking `dot.lives` inline.
+- `validateMove(state, move)` — returns
+  `{ ok, violations: [{ rule, dotId }, ...] }`. Checks dot existence
+  and lives (self-loop needs ≥2 on the one dot involved; a normal
+  move needs ≥1 on each of its two distinct endpoints, checked as
+  mutually exclusive branches). Collects every applicable violation
+  in one call rather than stopping at the first, so a doubly-invalid
+  move — both endpoints simultaneously out of lives — is fully
+  diagnosed in a single call. Deferred to v0.9/v1.0: crossings and
+  regions will add more entries to the same violations array; the
+  function's signature and return shape do not change when that
+  happens.
+- `RuleError` — coded violation reasons (`DOT_NOT_FOUND`,
+  `INSUFFICIENT_LIVES`). The engine never emits English text; `ui.js`
+  translates codes to player-facing strings via a local
+  `VIOLATION_MESSAGES` map, so bots, replay, and tests never need to
+  parse prose.
+- Future: `hasLegalMoves(state)` — v1.0, game-over detection.
 
 **`engine.js`** — stateful wrapper. Holds the current engine state and
-exposes `init(state)`, `apply(move)`, and `getState()`.
+exposes:
+- `init(state)`
+- `getState()`
+- `validate(move)` — calls `rules.js`'s `validateMove` against the
+  current state without mutating anything. Lets a caller (bot, or a
+  UI-layer shortcut) cheaply ask "would this work" before committing.
+- `apply(move)` — calls `validate()` first, visibly in the API rather
+  than as a silent internal guard. On success, applies the reducer
+  and returns `{ ok: true, state }`. On failure, internal state is
+  left completely unchanged and the reducer is never invoked; returns
+  `{ ok: false, violations }`. This makes `apply()` a safe,
+  side-effect-free no-op for illegal input — important for a bot
+  trying many candidate moves.
 
 **`reducer.js`** — pure function. Takes a state and a move, returns a
 new state. No DOM, no UI, no side effects. Same input always produces
-same output. This is the foundation for replay, bots, and AI.
+same output. Assumes the move it receives is already legal — it
+performs no validation itself and never will; `engine.js` guarantees
+this by calling `validate()` before the reducer ever runs. Keeping the
+reducer an unconditional state transition is what makes it easy to
+reason about, test, and reuse for replay.
 
 Current engine state shape:
 ```js
@@ -164,10 +205,19 @@ DrawInteraction callbacks, commits moves to the engine, syncs renderer
 and status text. The only module that reads HTML elements directly.
 
 Does not own drawing gesture mechanics (that's DrawInteraction) or
-game rules (that's the engine). Currently applies two UI-layer
-courtesy guards — exhausted dots (lives ≤ 0) cannot be selected, and a
-self-loop cannot be attempted on a dot with fewer than 2 lives — but
-neither is a substitute for engine validation (v0.8).
+game rules (that's the engine). Applies two UI-layer interaction
+shortcuts — exhausted dots cannot be selected, and a self-loop attempt
+is checked via `Engine.validate()` before the player draws a whole
+curve — but neither is an independent implementation of legality.
+`Engine.apply()`'s internal `validateMove()` call is the actual source
+of truth and would reject the same move regardless of whether either
+shortcut ran or had a bug.
+
+`commitMove()` checks `Engine.apply()`'s `result.ok` before any
+BoardView or Renderer mutation. A rejected move — whether from the
+UI-layer shortcut or a case only the engine catches — leaves no
+partial visual trace, the same guarantee a drawing-geometry rejection
+already provided.
 
 A lives-insufficiency rejection (e.g. an illegal self-loop attempt)
 clears the endpoint selection immediately rather than leaving it in
@@ -224,12 +274,15 @@ is. It never stores SVG elements, colours, coordinates, or animations.
 Visual concepts — where dots appear on screen, what paths edges follow,
 which player's colour to use — live in boardView, not in the engine.
 
-A dot is treated as exhausted when `lives <= 0`, not `lives === 0`.
-Until v0.8 adds real engine-level legality enforcement, a UI-layer
-rejection gap can allow lives to go negative (e.g. an insufficiently-
-checked self-loop). Using `<= 0` for the exhausted check means such a
-dot is still correctly locked out of further selection even though the
-one illegal move that caused it already went through.
+A dot is treated as exhausted when `lives <= 0` (via `Rules.isExhausted`),
+not `lives === 0`. Before v0.8, a UI-layer rejection gap could let an
+illegal move through and drive a dot's lives negative (e.g. an
+insufficiently-checked self-loop); `<= 0` was a defensive measure to
+stop such a dot from being reachable again. As of v0.8, `Engine.apply`
+rejects any move that would do this before the reducer ever runs, so
+lives should never actually go negative in normal operation — the
+`<= 0` check remains as cheap, harmless defence-in-depth rather than
+a load-bearing correctness fix.
 
 ---
 

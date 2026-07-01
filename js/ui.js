@@ -1,5 +1,5 @@
 /* ================================================================
-   ui.js — Sprouts v0.7.1
+   ui.js — Sprouts v0.8
 
    Responsibility
    ──────────────
@@ -14,6 +14,26 @@
    classification) are owned by drawInteraction.js — this file
    wires it up via callbacks and handles the results.
 
+   v0.8 — engine-enforced legality
+   ─────────────────────────────────
+   Engine.apply(move) now returns { ok, state } or { ok, violations }
+   instead of a raw state. commitMove() checks result.ok BEFORE any
+   BoardView/Renderer mutation — a rejected move must leave no partial
+   visual trace behind.
+
+   The UI-layer lives guards (exhausted-dot selection, self-loop
+   lives check) remain, but are no longer independent implementations
+   of "what's legal" — they now call engine/rules.js's isExhausted()
+   directly, so there is exactly one definition of exhaustion in the
+   codebase. These guards exist purely for responsiveness (stopping
+   the player before they draw a whole curve, rather than after);
+   Engine.apply's internal validateMove() call is the actual source
+   of truth and would reject the same move regardless.
+
+   Violation codes from the engine are translated to player-facing
+   text only here, via VIOLATION_MESSAGES — the engine never emits
+   English strings.
+
    UI is the only module that reads HTML elements directly.
    All human-readable strings live here.
 
@@ -22,13 +42,21 @@
    ================================================================ */
 
 import { createMove } from './engine/move.js';
-import { playerForMove } from './engine/rules.js';
+import { playerForMove, isExhausted, RuleError } from './engine/rules.js';
 import { getRegionForDot } from './engine/regions.js';
 import Engine from './engine/engine.js';
 import SelectionState from './selectionState.js';
 import BoardView from './boardView.js';
 import Renderer, { pathMidpoint } from './renderer.js';
 import * as DrawInteraction from './drawInteraction.js';
+
+// Local mapping from engine violation codes to player-facing text.
+// This is deliberately the UI's job — the engine only emits codes,
+// never prose, so bots/replay/tests never need to parse English.
+const VIOLATION_MESSAGES = {
+  [RuleError.DOT_NOT_FOUND]:      'That dot no longer exists.',
+  [RuleError.INSUFFICIENT_LIVES]: 'Not enough lives for that move.',
+};
 
 const UI = (() => {
 
@@ -103,14 +131,16 @@ const UI = (() => {
     const prevSecond = SelectionState.getSecondSelectedDotId();
 
     // Lives guard — only for NEW selections, not deselects.
-    // <= 0 rather than === 0: see renderer.js syncDotStates for why
-    // lives can currently go negative (no engine legality yet, v0.8).
+    // Calls engine/rules.js's isExhausted() rather than checking
+    // dot.lives inline, so there is exactly one definition of
+    // exhaustion in the codebase. This is an interaction shortcut,
+    // not a legality check — Engine.apply enforces the real rule.
     const isAlreadySelected = clickedId === prevFirst || clickedId === prevSecond;
     if (!isAlreadySelected) {
       const engineState = Engine.getState();
       if (engineState) {
         const dot = engineState.dots.find(d => d.id === clickedId);
-        if (dot && dot.lives <= 0) return;
+        if (dot && isExhausted(dot)) return;
       }
     }
 
@@ -139,16 +169,20 @@ const UI = (() => {
 
     } else if (clickedId === prevFirst) {
       // Same dot again → self-loop attempt.
-      // A loop consumes 2 lives (both ends of the curve land on the
-      // same dot), unlike a normal connection which consumes 1. The
-      // dot must have at least 2 lives for this to be a legal loop —
-      // checked here in the UI as a courtesy; the engine will enforce
-      // this properly at v0.8. Without this check, a dot with only 1
-      // life could be selected for a loop, the engine would apply it
-      // anyway (no legality checking yet), and lives would go negative.
+      // Rather than duplicating the "a loop needs 2 lives" threshold
+      // inline, construct the candidate move and ask Engine.validate
+      // directly — this is the same check Engine.apply will run when
+      // the move is actually drawn, so there is exactly one
+      // definition of self-loop legality anywhere in the codebase.
+      // This is an interaction shortcut (avoids letting the player
+      // draw a whole curve before finding out it's illegal), not a
+      // second, independent implementation of the rule.
       const engineState = Engine.getState();
-      const dot = engineState?.dots.find(d => d.id === clickedId);
-      if (dot && dot.lives < 2) {
+      const regionId = getRegionForDot(engineState, clickedId);
+      const candidateMove = createMove(clickedId, clickedId, regionId);
+      const validation = Engine.validate(candidateMove);
+
+      if (!validation.ok) {
         // Unlike a drawing-geometry rejection (crossing, self-
         // intersection), this is not retryable — the dot's lives
         // won't change if the player taps it again. Clear the
@@ -156,7 +190,10 @@ const UI = (() => {
         // with no way to back out; a second tap would otherwise just
         // re-enter this same branch and repeat the same rejection.
         SelectionState.clearFirst();
-        setStatus('Not enough lives for a loop. Select first endpoint.');
+        const message = validation.violations
+          .map(v => VIOLATION_MESSAGES[v.rule] ?? 'Illegal move.')
+          .join(' ');
+        setStatus(`${message} Select first endpoint.`);
         Renderer.updateSelection(
           { first: prevFirst, second: prevSecond },
           { first: null, second: null }
@@ -186,6 +223,13 @@ const UI = (() => {
   /**
    * Called by drawInteraction.js when a valid path is accepted.
    * Applies the move to the engine and syncs all visual state.
+   *
+   * Engine.apply now returns { ok, state } or { ok, violations }
+   * instead of a raw state. The ok check happens BEFORE any
+   * BoardView/Renderer mutation — a rejected move (e.g. the drawn
+   * curve reached the dot, but the engine rejects it for a reason
+   * the UI-layer shortcut didn't catch) must leave no partial visual
+   * trace, exactly like a drawing-geometry rejection.
    */
   function commitMove(path, a, b) {
     const prevFirst  = a;
@@ -197,7 +241,17 @@ const UI = (() => {
     const actingPlayer = playerForMove(moveIndex);
 
     const move = createMove(a, b, regionId);
-    const engineState = Engine.apply(move);
+    const result = Engine.apply(move);
+
+    if (!result.ok) {
+      const message = result.violations
+        .map(v => VIOLATION_MESSAGES[v.rule] ?? 'Illegal move.')
+        .join(' ');
+      handleDrawReject(message);
+      return;   // nothing else runs — BoardView/Renderer stay untouched
+    }
+
+    const engineState = result.state;
 
     BoardView.setEdgePath(moveIndex, path);
 

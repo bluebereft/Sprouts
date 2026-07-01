@@ -132,13 +132,53 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
   with drawing directly between two dots and validating afterward — remains
   a deferred, separately-scoped interaction redesign, not undertaken here.
 
-### v0.8 — Engine Rules
-- Enforce lives / degree rule inside the engine (not just UI)
-- Reject moves with exhausted endpoints (lives = 0) at the engine level,
-  so bots and test harnesses can trust the engine without UI pre-filtering
-- Self-loop legality
-- `isMoveLegal(state, move)` in `engine/rules.js`
-- `isExhausted(dot)` in `engine/rules.js`, replaces the UI-layer guard
+### v0.8 — Engine Rules ✅
+- Re-verified rule content against primary sources (Wikipedia, Encyclopedia
+  of Mathematics, gameofsprouts.blogspot.com, arxiv Čížek & Balko) before
+  implementing — confirmed self-loop needs lives ≥ 2, normal move needs
+  lives ≥ 1 on each endpoint, new sprout always starts at 1 life; no rule
+  content changes resulted, only implementation-logic refinements
+- Designed as a stable engine API contract, not just a legality patch —
+  intended to be the same interface bots, replay, and AI call through later
+- `RuleError` enum (`DOT_NOT_FOUND`, `INSUFFICIENT_LIVES`) — engine emits
+  coded reasons, never English prose; UI translates codes to player-facing
+  text via a local `VIOLATION_MESSAGES` map
+- `Rules.validateMove(state, move)` — pure function, returns
+  `{ ok, violations: [{ rule, dotId }, ...] }`. Collects ALL applicable
+  violations in one call rather than stopping at the first. Existence and
+  lives checks run independently per dot so a missing dot doesn't prevent
+  checking the other. Self-loop and normal-move are mutually exclusive
+  branches — a loop is checked as one `lives >= 2` condition on the single
+  dot involved, never as two independent `lives >= 1` checks against it
+- `Rules.isExhausted(dot)` — single definition of "no lives remaining",
+  used everywhere a dot's exhaustion is checked
+- `Engine.validate(move)` — exposed separately from `apply()`. Never
+  mutates state. Lets a caller (bot, UI shortcut) cheaply ask "would this
+  work" before committing
+- `Engine.apply(move)` — now calls `validate()` first internally, visible
+  in the API rather than buried silently. Returns `{ ok: true, state }` on
+  success or `{ ok: false, violations }` on failure. On failure, internal
+  engine state is left completely unchanged — the reducer is never invoked
+  for an illegal move, making `apply()` a safe, side-effect-free no-op for
+  illegal input (important for a bot trying many candidate moves)
+- `Reducer.applyMove()` unchanged — continues to assume every move it
+  receives is already legal; legality checking is not the reducer's job
+  and never will be
+- `ui.js` — `commitMove()` checks `result.ok` before any BoardView/Renderer
+  mutation, so a rejected move leaves no partial visual trace. Self-loop
+  UI shortcut now constructs a candidate move and calls `Engine.validate()`
+  directly rather than duplicating the lives threshold inline
+- Consolidated: removed inline `dot.lives <= 0` / `dot.lives < 2` checks
+  from `ui.js` and `renderer.js` (both call sites now call
+  `Rules.isExhausted()`); UI-layer guards reframed as interaction
+  shortcuts, not independent legality — the engine is the sole source of
+  truth and would reject the same move regardless
+- **Known gap:** `DOT_NOT_FOUND` is currently unreachable through normal
+  play (the UI can only ever select existing dots) — verified via direct
+  console calls to `Engine.apply()`/`Engine.validate()` with a
+  deliberately malformed move, same approach used for `pathSimplify`/
+  `crossingDetection` testing. A real test file (`Phase 2` candidate) would
+  remove the need for manual console verification as the rule set grows
 
 ### v0.8.5 — Save / Load
 - Serialise engine state + boardView paths to JSON

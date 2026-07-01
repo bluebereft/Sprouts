@@ -1,9 +1,16 @@
  /* ================================================================
-   reducer.js — Sprouts Engine Core (v0.7)
+   reducer.js — Sprouts Engine Core (v0.8)
 
    Responsibility
    ──────────────
    Pure function that applies a Move to a Game State.
+
+   ASSUMES THE MOVE IS ALREADY LEGAL. As of v0.8, engine.js calls
+   engine/rules.js's validateMove() and only invokes this function
+   if validation passes — see engine.js. This function performs no
+   legality checking itself and never will; keeping it a pure,
+   unconditional state transition is what makes it easy to reason
+   about, test, and reuse for replay.
 
    IMPORTANT RULES:
    - NO DOM access
