@@ -118,21 +118,19 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
 - Orphaned `.btn-secondary` / `.btn--hidden` CSS rules removed
 - Unused `promoteSecondToFirst` removed from `selectionState.js`
 - All file version headers normalised to v0.7
-- Status text tightened ("Draw a curve between the dots." /
-  "Draw a loop from this dot.")
-- **Known issue (tracked, not yet fixed):** if a self-loop is attempted on
-  a dot with insufficient lives, the rejection leaves the dot selected with
-  no way to deselect by tapping it again — the tap re-enters the same
-  rejection branch indefinitely. Fix: treat a lives-insufficiency rejection
-  as an immediate deselect (unlike drawing-geometry rejections, which
-  intentionally preserve selection for retry, a lives rejection is not
-  retryable — the dot's lives won't change).
-- **UX note (deferred):** deselecting a dot by tapping it is not currently
-  discoverable. Near-term candidate fix: extend the "both selected" status
-  message to mention it. Longer-term candidate: reconsider whether the
-  two-step select-then-draw model should be replaced with drawing directly
-  between two dots and validating afterward — a larger interaction redesign
-  requiring its own scoping discussion, not a small fix.
+- Status text tightened, then extended further to include a deselect hint
+  ("...or tap it again to deselect.", "...or tap one to deselect it.")
+- **Fixed:** self-loop lives-insufficiency rejection previously left the
+  dot stuck selected with no way to deselect by tapping it again (the tap
+  re-entered the same rejection branch indefinitely). Now clears the
+  selection immediately on rejection — unlike a drawing-geometry rejection
+  (crossing, self-intersection), a lives rejection is not retryable, since
+  the dot's lives won't change on a second attempt, so there is nothing to
+  preserve by keeping it selected.
+- **UX discoverability:** addressed with the status text hint above.
+  Longer-term candidate — replacing the two-step select-then-draw model
+  with drawing directly between two dots and validating afterward — remains
+  a deferred, separately-scoped interaction redesign, not undertaken here.
 
 ### v0.8 — Engine Rules
 - Enforce lives / degree rule inside the engine (not just UI)

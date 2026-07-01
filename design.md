@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.7.1
+Last updated: v0.7.1 (self-loop deselect fix, discoverability hint)
 
 ## Philosophy
 
@@ -164,9 +164,16 @@ DrawInteraction callbacks, commits moves to the engine, syncs renderer
 and status text. The only module that reads HTML elements directly.
 
 Does not own drawing gesture mechanics (that's DrawInteraction) or
-game rules (that's the engine). Currently applies a UI-layer lives
-guard as a courtesy — exhausted dots cannot be selected — but this is
-not a substitute for engine validation (v0.8).
+game rules (that's the engine). Currently applies two UI-layer
+courtesy guards — exhausted dots (lives ≤ 0) cannot be selected, and a
+self-loop cannot be attempted on a dot with fewer than 2 lives — but
+neither is a substitute for engine validation (v0.8).
+
+A lives-insufficiency rejection (e.g. an illegal self-loop attempt)
+clears the endpoint selection immediately rather than leaving it in
+place, since — unlike a drawing-geometry rejection, where the same
+retry might succeed — a dot's lives will not change on a second
+attempt, so there is nothing to preserve.
 
 ---
 
@@ -193,12 +200,6 @@ movement, removes this dependency entirely.
 Does not modify game state, update status text, or know about the
 engine beyond reading existing edge paths from BoardView for crossing
 checks.
-
-**Known issue:** if a self-loop is attempted on a dot with fewer than
-2 lives, ui.js rejects it but currently leaves the dot selected with
-no way to deselect by tapping it again (see ROADMAP.md v0.7.1 for the
-planned fix — treat a lives-insufficiency rejection as an immediate
-deselect, since unlike geometry rejections it is not retryable).
 
 ---
 

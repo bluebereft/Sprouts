@@ -1,5 +1,5 @@
 /* ================================================================
-   ui.js — Sprouts v0.7
+   ui.js — Sprouts v0.7.1
 
    Responsibility
    ──────────────
@@ -149,15 +149,27 @@ const UI = (() => {
       const engineState = Engine.getState();
       const dot = engineState?.dots.find(d => d.id === clickedId);
       if (dot && dot.lives < 2) {
-        setStatus('Not enough lives left for a loop on this dot.');
+        // Unlike a drawing-geometry rejection (crossing, self-
+        // intersection), this is not retryable — the dot's lives
+        // won't change if the player taps it again. Clear the
+        // selection immediately rather than leaving the dot selected
+        // with no way to back out; a second tap would otherwise just
+        // re-enter this same branch and repeat the same rejection.
+        SelectionState.clearFirst();
+        setStatus('Not enough lives for a loop. Select first endpoint.');
+        Renderer.updateSelection(
+          { first: prevFirst, second: prevSecond },
+          { first: null, second: null }
+        );
+        syncDrawMode();
         return;
       }
       SelectionState.selectSecond(clickedId);
-      setStatus('Draw a loop from this dot.');
+      setStatus('Draw a loop from this dot, or tap it again to deselect.');
 
     } else {
       SelectionState.selectSecond(clickedId);
-      setStatus('Draw a curve between the dots.');
+      setStatus('Draw a curve between the dots, or tap one to deselect it.');
     }
 
     Renderer.updateSelection(
