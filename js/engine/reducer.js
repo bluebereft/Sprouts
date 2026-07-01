@@ -1,5 +1,5 @@
  /* ================================================================
-   reducer.js — Sprouts Engine Core (v0.6.1)
+   reducer.js — Sprouts Engine Core (v0.7)
 
    Responsibility
    ──────────────

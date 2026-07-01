@@ -73,30 +73,74 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
 
 ---
 
-### v0.7 — Drawn Moves (in progress)
+### v0.7 — Drawn Moves ✅
 - Research: reviewed published Sprouts implementation literature (Čížek &
   Balko, GD 2021) to confirm canonical position representation requirements
   before implementing drawing — see design.md for findings
-- Decided against live-constrained ("guided freehand") drawing in favour of
-  simpler freehand-then-validate: draw normally, simplify and check for
-  crossings only after the pointer is released, reject with a message and
-  allow redraw if invalid. Avoids needing a real-time region-boundary query
-  that would otherwise require a throwaway browser-side module.
-- `engine/move.js` — `regionId` field added to Move (defaults to 0) ✅
-- `engine/regions.js` — combinatorial region stub, always returns region 0,
-  ready for real implementation at v0.9 without changing its interface ✅
-- `js/pathSimplify.js` — Douglas-Peucker curve simplification (pure geometry) ✅
-- `js/crossingDetection.js` — segment intersection / path crossing checks
-  (pure geometry); permanent infrastructure, reused unchanged at v0.9 against
-  real region boundaries rather than a flat edge list ✅
-- Remaining: wire pointer-driven drawing into `ui.js`, render real `<path>`
-  curves in `renderer.js`, arc-length sprout placement
+- Freehand-then-validate drawing: draw normally, simplify and check for
+  crossings after pointer release, reject with message if invalid, allow
+  immediate redraw without reselecting endpoints
+- `engine/move.js` — `regionId` field added to Move (defaults to 0)
+- `engine/regions.js` — combinatorial region stub, always returns region 0
+- `js/pathSimplify.js` — Douglas-Peucker curve simplification
+- `js/crossingDetection.js` — segment intersection, path crossing, dot-radius
+  trim via `trimNearPoints()`
+- `js/drawInteraction.js` — extracted pointer gesture and validation from
+  ui.js; movement-based tap-vs-drag classification; reports via callbacks
+- `js/constants.js` — shared DOT_RADIUS and derived thresholds
+- Smooth curve rendering via Catmull-Rom-to-Bezier conversion
+- Arc-length midpoint placement for new sprout dots
+- Endpoint snapping to exact dot centers on commit
+- Self-loop support (click same dot twice to select, then draw loop)
+- Draw from either endpoint
+- Epsilon tolerance in crossing detection for hand-drawn input
+- Cleaned up: dead `engine/state.js` deleted, orphaned CSS rules removed,
+  unused `promoteSecondToFirst` removed, version strings normalised
+
+### v0.7.1 — Refactor & Interaction Fixes ✅
+- Extracted `js/drawInteraction.js` from `ui.js` (647 → 274 lines); ui.js now
+  purely orchestrates, drawInteraction.js owns gesture mechanics
+- `js/constants.js` introduced — `DOT_RADIUS`, `DOT_CAPTURE_RADIUS`,
+  `DOT_EXCLUSION_RADIUS` centralised, derived from one source
+- Redesigned pointer/tap interpretation: drawInteraction.js now owns ALL
+  pointer gestures on the board, including taps (dot selection/deselection),
+  reported via a new `onTap(dotId)` callback. Native browser `click` event
+  is no longer used for game logic — pointer capture was found to
+  unreliably redirect click-event targeting across browsers, silently
+  breaking dot deselection once both endpoints were selected
+- Fixed: exhaustion check was `dot.lives === 0`, missed negative lives that
+  can occur before v0.8 engine legality exists; changed to `dot.lives <= 0`
+  in both `renderer.js` and `ui.js`'s lives guard
+- Fixed: self-loop selection had no check that the dot had ≥2 lives (a loop
+  consumes 2, not 1); added explicit guard in `ui.js`'s tap handler
+- Dead file `js/engine/state.js` deleted (superseded by `selectionState.js`
+  since v0.5, never imported)
+- Orphaned `.btn-secondary` / `.btn--hidden` CSS rules removed
+- Unused `promoteSecondToFirst` removed from `selectionState.js`
+- All file version headers normalised to v0.7
+- Status text tightened ("Draw a curve between the dots." /
+  "Draw a loop from this dot.")
+- **Known issue (tracked, not yet fixed):** if a self-loop is attempted on
+  a dot with insufficient lives, the rejection leaves the dot selected with
+  no way to deselect by tapping it again — the tap re-enters the same
+  rejection branch indefinitely. Fix: treat a lives-insufficiency rejection
+  as an immediate deselect (unlike drawing-geometry rejections, which
+  intentionally preserve selection for retry, a lives rejection is not
+  retryable — the dot's lives won't change).
+- **UX note (deferred):** deselecting a dot by tapping it is not currently
+  discoverable. Near-term candidate fix: extend the "both selected" status
+  message to mention it. Longer-term candidate: reconsider whether the
+  two-step select-then-draw model should be replaced with drawing directly
+  between two dots and validating afterward — a larger interaction redesign
+  requiring its own scoping discussion, not a small fix.
 
 ### v0.8 — Engine Rules
 - Enforce lives / degree rule inside the engine (not just UI)
+- Reject moves with exhausted endpoints (lives = 0) at the engine level,
+  so bots and test harnesses can trust the engine without UI pre-filtering
 - Self-loop legality
-- Reject illegal moves before they reach the reducer
-- New sprout dot gets correct starting lives (already correct in reducer)
+- `isMoveLegal(state, move)` in `engine/rules.js`
+- `isExhausted(dot)` in `engine/rules.js`, replaces the UI-layer guard
 
 ### v0.8.5 — Save / Load
 - Serialise engine state + boardView paths to JSON

@@ -1,5 +1,5 @@
 /* ================================================================
-   app.js — Sprouts v0.4 (Module Entry Point)
+   app.js — Sprouts v0.7 (Module Entry Point)
 
    Responsibility
    ──────────────

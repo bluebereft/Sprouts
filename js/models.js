@@ -1,5 +1,5 @@
 /* ================================================================
-   models.js — Sprouts v0.5
+   models.js — Sprouts v0.7
 
    Responsibility
    ──────────────

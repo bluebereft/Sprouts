@@ -1,5 +1,5 @@
 /* ================================================================
-   crossingDetection.js — Sprouts v0.7.3
+   crossingDetection.js — Sprouts v0.7
 
    Responsibility
    ──────────────
@@ -10,8 +10,8 @@
    It operates only on arrays of {x, y} points and plain numbers.
    No imports from engine/, boardView.js, or any game-specific module.
 
-   v0.7.3 — dot-radius exclusion
-   ─────────────────────────────
+   Dot-radius exclusion
+   ─────────────────────
    Every edge path's first and last point sit at (or very near) a
    dot's center. Two different edges sharing the same dot will both
    have a short final segment running from "just outside the dot"

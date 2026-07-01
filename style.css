@@ -210,35 +210,6 @@ body {
   letter-spacing: 0.01em;
 }
 
-/* ── Secondary button (Create Move) ─────────────────────────────── */
-.btn-secondary {
-  height: var(--control-height);
-  padding: 0 var(--control-px);
-  border-radius: var(--control-radius);
-  border: 1.5px solid var(--color-accent);
-  background: transparent;
-  color: var(--color-accent);
-  font-family: var(--font-sans);
-  font-size: 0.9375rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s ease, color 0.15s ease,
-              box-shadow 0.15s ease, transform 0.1s ease;
-}
-
-.btn-secondary:hover {
-  background: var(--color-accent);
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(79, 109, 90, 0.25);
-}
-
-.btn-secondary:active { transform: scale(0.97); box-shadow: none; }
-.btn-secondary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(79, 109, 90, 0.3); }
-
-/* ── Hidden utility ─────────────────────────────────────────────── */
-.btn--hidden { display: none; }
-
 /* ── Move list section ──────────────────────────────────────────── */
 .move-list-section {
   border-top: 1px solid var(--color-border);

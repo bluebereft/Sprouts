@@ -1,5 +1,5 @@
 /* ================================================================
-   selectionState.js — Sprouts v0.5
+   selectionState.js — Sprouts v0.7
 
    Responsibility
    ──────────────
@@ -13,9 +13,6 @@
    This is NOT engine state. It contains no game rules and knows
    nothing about edges, legality, or move history. Those live in
    engine/engine.js and engine/reducer.js.
-
-   Moved from engine/state.js → js/selectionState.js (v0.5) to
-   make clear that this belongs to the UI layer, not the engine.
    ================================================================ */
 
 import { createDot } from './models.js';
@@ -104,16 +101,6 @@ const SelectionState = (() => {
   /** Clears only the second endpoint, leaving the first intact. */
   function clearSecond() { secondSelectedDotId = null; }
 
-  /**
-   * Promotes the second endpoint to first position.
-   * Used when the player deselects the first dot while a second
-   * is already chosen — the second becomes the new first.
-   */
-  function promoteSecondToFirst() {
-    firstSelectedDotId  = secondSelectedDotId;
-    secondSelectedDotId = null;
-  }
-
   /** Clears both endpoint slots. Called after a move is committed. */
   function clearSelections() {
     firstSelectedDotId  = null;
@@ -131,7 +118,6 @@ const SelectionState = (() => {
     selectSecond,
     clearFirst,
     clearSecond,
-    promoteSecondToFirst,
     clearSelections,
   };
 

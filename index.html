@@ -64,9 +64,8 @@
 
       <!-- ─── Debug: move list ──────────────────────────────────── -->
       <!--
-        v0.5: a plain-text log of committed Move objects.
+        Debug log of committed moves.
         Populated by UI.renderMoveList() after each move is committed.
-        Will be removed or replaced when a proper game log is designed.
       -->
       <section class="move-list-section">
         <h2 class="move-list-section__title">Moves</h2>
@@ -84,12 +83,16 @@
 
   <!--
     Single module entry point. ES module imports resolve the full
-    dependency graph automatically — no additional script tags needed.
+    dependency graph automatically.
 
-    Load order (via imports):
-      app.js → ui.js → boardView.js, selectionState.js, renderer.js
+    Module graph (via imports):
+      app.js → ui.js → drawInteraction.js → pathSimplify.js
+                      → drawInteraction.js → crossingDetection.js
+                      → drawInteraction.js → constants.js
+                      → boardView.js, selectionState.js
+                      → renderer.js → constants.js
                       → engine/engine.js → engine/reducer.js
-                      → engine/move.js
+                      → engine/move.js, engine/rules.js, engine/regions.js
                       → models.js
   -->
   <script type="module" src="js/app.js"></script>

@@ -1,5 +1,5 @@
 /* ================================================================
-   rules.js — Sprouts Engine Rules (v0.6.1)
+   rules.js — Sprouts Engine Rules (v0.7)
 
    Responsibility
    ──────────────

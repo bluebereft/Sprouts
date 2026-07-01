@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.7 (in progress)
+Last updated: v0.7.1
 
 ## Philosophy
 
@@ -24,18 +24,25 @@ The project should remain understandable by a single developer.
 ## Architecture
 
 ```
-UI  (ui.js)
+UI  (ui.js)                              — orchestration, status, turn indicator
  │
- ├── SelectionState  (selectionState.js)   — which dots the player has clicked
+ ├── DrawInteraction (drawInteraction.js) — pointer gesture, path validation
+ │    ├── pathSimplify.js                 — Douglas-Peucker simplification
+ │    ├── crossingDetection.js            — segment intersection, trimming
+ │    └── constants.js                    — shared DOT_RADIUS and thresholds
  │
- ├── BoardView       (boardView.js)        — browser-only visual state
- │     dot positions, edge paths, player colours
+ ├── SelectionState  (selectionState.js)  — which dots the player has clicked
+ │
+ ├── BoardView       (boardView.js)       — browser-only visual state
+ │     dot positions, edge paths
  │     never passed to the engine
  │
- ├── Engine          (engine/engine.js)    — stateful wrapper around reducer
- │    └── Reducer    (engine/reducer.js)   — pure game state transitions
+ ├── Engine          (engine/engine.js)   — stateful wrapper around reducer
+ │    ├── Reducer    (engine/reducer.js)  — pure game state transitions
+ │    ├── Rules      (engine/rules.js)    — pure game rule functions
+ │    └── Regions    (engine/regions.js)  — combinatorial region model (stub)
  │
- └── Renderer        (renderer.js)         — SVG board
+ └── Renderer        (renderer.js)        — SVG board
       reads from SelectionState and BoardView
       never reads from engine directly
       └── SVG
@@ -152,16 +159,57 @@ This avoids animation re-firing and unnecessary DOM churn.
 
 ### UI (`js/ui.js`)
 
-Handles buttons, dropdowns, clicks, status text, and the turn indicator.
+Coordinates all other modules. Handles dot selection clicks, wires up
+DrawInteraction callbacks, commits moves to the engine, syncs renderer
+and status text. The only module that reads HTML elements directly.
 
-The only module that reads HTML elements directly.
+Does not own drawing gesture mechanics (that's DrawInteraction) or
+game rules (that's the engine). Currently applies a UI-layer lives
+guard as a courtesy — exhausted dots cannot be selected — but this is
+not a substitute for engine validation (v0.8).
 
-Coordinates all other modules — it is the only place that knows about
-SelectionState, BoardView, Engine, and Renderer simultaneously.
+---
 
-Does not enforce game rules. Rule enforcement is the engine's job (v0.8).
-Currently applies a UI-layer lives guard as a courtesy — exhausted dots
-cannot be selected — but this is not a substitute for engine validation.
+### DrawInteraction (`js/drawInteraction.js`)
+
+Owns ALL pointer interpretation on the board — both taps (dot
+selection/deselection) and drags (curve drawing). Sampling always
+starts on pointerdown; on pointerup, net movement decides whether the
+gesture was a tap or a drag.
+
+For a tap, `onTap(dotId)` is called so ui.js can run its own
+selection/deselection logic. For a drag, the full simplify → validate
+→ commit-or-reject pipeline runs (crossing detection, endpoint
+distance, self-intersection), reporting via `onMoveDrawn` / `onReject`.
+
+The module does NOT use the browser's native `click` event for game
+logic. An earlier version relied on `click` firing after a tap that
+was too short to count as a drag, but `setPointerCapture` was found to
+unreliably redirect the click event's hit-testing target to the
+capturing element across browsers — silently breaking dot deselection.
+Owning tap detection directly, driven purely by measured pointer
+movement, removes this dependency entirely.
+
+Does not modify game state, update status text, or know about the
+engine beyond reading existing edge paths from BoardView for crossing
+checks.
+
+**Known issue:** if a self-loop is attempted on a dot with fewer than
+2 lives, ui.js rejects it but currently leaves the dot selected with
+no way to deselect by tapping it again (see ROADMAP.md v0.7.1 for the
+planned fix — treat a lives-insufficiency rejection as an immediate
+deselect, since unlike geometry rejections it is not retryable).
+
+---
+
+### Constants (`js/constants.js`)
+
+Shared numeric constants derived from the same underlying concept:
+DOT_RADIUS (how big a dot is), DOT_CAPTURE_RADIUS (how close a drawn
+curve must end to a dot), DOT_EXCLUSION_RADIUS (crossing-detection
+skip zone around each dot). Centralised here so renderer.js and
+drawInteraction.js derive from the same source instead of duplicating
+magic numbers.
 
 ---
 
@@ -174,6 +222,13 @@ is. It never stores SVG elements, colours, coordinates, or animations.
 
 Visual concepts — where dots appear on screen, what paths edges follow,
 which player's colour to use — live in boardView, not in the engine.
+
+A dot is treated as exhausted when `lives <= 0`, not `lives === 0`.
+Until v0.8 adds real engine-level legality enforcement, a UI-layer
+rejection gap can allow lives to go negative (e.g. an insufficiently-
+checked self-loop). Using `<= 0` for the exhausted check means such a
+dot is still correctly locked out of further selection even though the
+one illegal move that caused it already went through.
 
 ---
 
@@ -246,4 +301,14 @@ no game knowledge and no persistent state:
 - **`js/pathSimplify.js`** — Douglas-Peucker simplification of raw
   pointer-sampled points into a clean curve.
 - **`js/crossingDetection.js`** — segment intersection tests: does a
-  candidate path cross any existing path, or itself.
+  candidate path cross any existing path, or itself. Includes
+  `trimNearPoints()` for excluding dot-radius zones from checks.
+- **`js/drawInteraction.js`** — owns the full pointer gesture lifecycle
+  (pointerdown/move/up), path validation pipeline, and movement-based
+  tap-vs-drag classification. Reports results to ui.js via callbacks.
+- **`js/constants.js`** — shared DOT_RADIUS and derived thresholds.
+
+Path endpoints are snapped to exact dot centers on commit, so every
+stored path begins and ends precisely at a dot's position regardless
+of where within the dot's radius the player clicked. This improves
+both visual tidiness and crossing-detection accuracy.

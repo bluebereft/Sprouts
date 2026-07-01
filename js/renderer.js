@@ -33,17 +33,18 @@
    (arc-length midpoint) rather than the straight-line midpoint
    between the two original endpoints.
 
-   Depends on: selectionState.js, boardView.js, engine/rules.js
+   Depends on: selectionState.js, boardView.js, engine/rules.js,
+               constants.js
    ================================================================ */
 
 import SelectionState from './selectionState.js';
 import BoardView from './boardView.js';
 import { playerForMove } from './engine/rules.js';
+import { DOT_RADIUS } from './constants.js';
 
 const Renderer = (() => {
 
-  const SVG_NS     = 'http://www.w3.org/2000/svg';
-  const DOT_RADIUS = 8;
+  const SVG_NS = 'http://www.w3.org/2000/svg';
 
   // Map<dotId, SVGCircleElement> — retained for the game's lifetime.
   let circleEls = new Map();
@@ -107,7 +108,7 @@ const Renderer = (() => {
     circle.setAttribute('cx', pos.x);
     circle.setAttribute('cy', pos.y);
     circle.setAttribute('r',  DOT_RADIUS);
-    circle.setAttribute('class', dotClass(dot.id, dot.lives === 0));
+    circle.setAttribute('class', dotClass(dot.id, dot.lives <= 0));
     circle.style.setProperty('--dot-index', index);
     circle.dataset.dotId = dot.id;
 
@@ -293,14 +294,21 @@ const Renderer = (() => {
 
   /**
    * Syncs dot appearance after a move — applies exhausted class to
-   * any dot whose lives have reached 0 without recreating elements.
+   * any dot with 0 or fewer lives remaining, without recreating
+   * elements. Uses <= 0 rather than === 0 because the engine has no
+   * legality enforcement yet (v0.8): an illegal move — e.g. a
+   * self-loop on a dot with only 1 life, which requires 2 — can
+   * currently drive a dot's lives negative. Treating any non-positive
+   * value as exhausted stops the dot from being reachable again,
+   * even though the one illegal move that caused it already went
+   * through. Full prevention arrives at v0.8 (engine-level legality).
    *
    * @param {object} engineState
    */
   function syncDotStates(engineState) {
     if (!engineState || !Array.isArray(engineState.dots)) return;
     engineState.dots.forEach(dot => {
-      applyDotClass(dot.id, dot.lives === 0);
+      applyDotClass(dot.id, dot.lives <= 0);
     });
   }
 
