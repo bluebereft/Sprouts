@@ -1,5 +1,5 @@
 /* ================================================================
-   ui.js — Sprouts v0.8.5
+   ui.js — Sprouts v0.9
 
    Responsibility
    ──────────────
@@ -43,7 +43,7 @@
 
 import { createMove } from './engine/move.js';
 import { playerForMove, isExhausted, RuleError } from './engine/rules.js';
-import { getRegionForDot } from './engine/regions.js';
+import { getRegionForDot, buildInitialTopology } from './engine/regions.js';
 import Engine from './engine/engine.js';
 import SelectionState from './selectionState.js';
 import BoardView from './boardView.js';
@@ -309,6 +309,7 @@ const UI = (() => {
       currentPlayer:   0,
       initialDotCount: count,
       startingPlayer:  0,
+      ...buildInitialTopology(count),
     });
 
     DrawInteraction.reset();

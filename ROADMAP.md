@@ -343,36 +343,131 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
   already correctly anticipates future multi-violation cases
 - 61 tests total, all passing (46 existing, 2 replaced, 17 new)
 
-### v0.9 — Topological Model
-- Replace `engine/regions.js` stub with real region tracking
-- **Note carried from the v0.8.6 architecture review:** this is not
-  contained to `regions.js` alone. Making `regionId` meaningful requires
-  `reducer.js`'s `applyMove()` itself to gain real region-splitting logic
-  — the reducer's current flat, easy-to-audit character should not be
-  assumed to survive unchanged. Decide deliberately at this point whether
-  region-splitting belongs directly inside `applyMove()` or as a separate
-  pass it calls out to, rather than letting conditionals accrete in place
-- Region splitting: how a move divides one region into two
-- Boundary structure per region (supports multiple boundaries per region,
-  e.g. a free-floating dot inside a larger region)
-- Canonical encoding inspired by published string representation sr(P):
-  per land → per region → per boundary → cyclic sequence of vertex visits
-- Mathematical representation begins to diverge from browser representation
-- Foundation for canonicalisation and position hashing
+### v0.9 — Topological Model (unbundled into sub-versions)
+
+Originally scoped as one version bundling four distinct mathematical
+capabilities: the data model, query functions, the mutation/splitting
+algorithm, and region-aware legality. Following a design review, these
+are now separate milestones — the same reasoning that split v0.8 into
+v0.8/v0.8.1/v0.8.5/v0.8.6, and directly informed by the v0.8.6
+architecture review's note that this work is not contained to
+`regions.js` alone.
+
+**Architectural framing:** the engine is moving from representing a
+plain graph (vertices + edges) to representing an embedded planar
+graph (vertices + edges + faces/regions + boundary cycles) — a
+different kind of mathematical object, not a richer version of the
+same one. Everything from v0.9 onward is reducer work on that
+different object.
+
+#### v0.9 — Topological data model ✅
+- `engine/regions.js` — new `buildInitialTopology(dotCount)`. Seeds the
+  starting position as one region containing **one boundary per dot**,
+  each of length 1 — not one shared boundary holding every dot. A
+  boundary is a cyclic walk along real edges; with zero edges at game
+  start there is no walk connecting separate dots, so each isolated dot
+  is trivially its own boundary. This matters for Euler's formula
+  (`V − E + F = 1 + C`): N isolated dots means `C = N`, which requires
+  N boundaries, not one — getting this wrong here would fail the
+  invariant checker on the very first position it's asked to check
+- Engine state shape gains `regions`, `boundaries`, `nextRegionId`,
+  `nextBoundaryId`. `reducer.js` needed NO changes — its `...state`
+  spread already carries forward fields it doesn't know about, the same
+  mechanism that let `initialDotCount`/`startingPlayer` ride along for
+  free at v0.8.5. Confirms the scope is genuinely as narrow as intended
+- `getRegionForDot`'s stub body is deliberately UNCHANGED — still always
+  returns 0, and remains behaviourally correct throughout v0.9 (only
+  region 0 exists until v0.9.2's splitting logic exists). The value
+  doesn't change yet, only how it will be computed once v0.9.1 replaces
+  the implementation with a genuine lookup
+- Seeded at both fresh-game construction sites: `ui.js`'s `startGame`
+  and `gameRecord.js`'s `buildInitialState`, via the same
+  `buildInitialTopology()` call — avoiding the duplication risk that
+  `initialDotCount`/`startingPlayer` deliberately avoided the same way
+- `tests/engine/regions.test.js` (new, 7 tests) — narrow structural
+  checks on `buildInitialTopology()` only: one region, exactly
+  `dotCount` boundaries (not one shared boundary), correct vertex
+  membership, sequential ids, correct starting counters, and the
+  degenerate 1-dot case. Deliberately does NOT test Euler's formula,
+  `getRegionForDot`, or any invariant checker — those belong to v0.9.1,
+  which will test them against hand-constructed multi-region fixtures
+  independent of anything this version produces
+- `gameRecord.test.js` fixtures updated to seed topology consistently
+  with real game construction; new round-trip test confirming
+  regions/boundaries/counters re-derive identically on import
+- 69 tests total, all passing (61 existing + 8 new)
+- Not observable in the browser — with exactly one region for the
+  entire duration of this milestone, a genuinely-computed
+  `getRegionForDot` result and the hardcoded stub are identical. This
+  is intentional, the same safe isolation `regionId` itself had for two
+  full versions before v0.9 gave it anything to compute
+
+#### v0.9.1 — Pure region query functions (not yet started)
+- `getBoundaryForDot`, `getRegionForDot` (real implementation),
+  `areDotsInSameRegion`, `areDotsOnSameBoundary`, `getBoundariesForRegion`
+- A `checkInvariants(state)` structural checker — `{ ok, violations }`
+  shape matching `validateMove`'s — covering: every dot in exactly one
+  boundary, every boundary in exactly one region, boundary vertex
+  sequences correspond to real edges, and Euler's formula
+- Tests built against HAND-CONSTRUCTED multi-region/multi-boundary
+  fixtures — deliberately never produced by a splitting algorithm, since
+  none exists yet, so these tests remain a trustworthy oracle
+  independent of whatever v0.9.2 later produces
+- Open question to resolve via the literature pass before implementing:
+  where (if anywhere) do "lands" (independent connected components)
+  belong — possibly a canonicalisation-layer concept rather than an
+  engine one; not yet certain
+
+#### v0.9.2 — Reducer learns to mutate the topological model (not yet started)
+- Expected to be the hardest algorithm in the project so far
+- Two topologically distinct operations, NOT one algorithm with a
+  branch — per Čížek & Balko: a **single-boundary move** (both
+  endpoints already on the same boundary) splits that boundary and its
+  region into two; a **double-boundary move** (endpoints on different
+  boundaries within the same region) merges those boundaries without
+  splitting the region at all
+- Plan: implement and fully test the single-boundary (split) case first,
+  then the double-boundary (merge) case, each checked against v0.9.1's
+  `checkInvariants` independently before moving to the next
+  - Confirm during the literature pass whether self-loops reduce to the
+  single-boundary case naturally or need distinct handling — the
+  reducer already special-cases self-loops for lives arithmetic, so
+  precedent exists either way
+- **Required before writing any of this:** a dedicated literature
+  verification pass (Čížek & Balko primarily), the same discipline
+  already applied for lives/degree rules at v0.6 and drawing feasibility
+  at v0.7 — not implemented from memory of earlier research
+
+#### v0.9.3 — Region-aware legality (not yet started)
+- `validateMove` gains a new coded violation (e.g. `DIFFERENT_REGIONS`)
+  when the two dots involved don't share a region
+- Crossing detection remains v1.0's job, not this version's — v0.9.3 is
+  "the engine enforces that a move stays within one region," not
+  "the engine detects an edge crossing within a region"
 
 ### v1.0 — Fully Playable Sprouts
 - Complete legal move generation
 - Game-over detection
-- Crossing detection and region splitting fully integrated into engine rules
-  (geometry-side primitives already exist from v0.7 — `crossingDetection.js`
-  — this version connects them to the real topological model)
+- Crossing detection integrated into engine rules, reusing the geometry
+  primitives that already exist from v0.7 (`crossingDetection.js`) and
+  building on v0.9's now-real topological model
 
 ---
 
 ## Phase 2 - Research Tools
 
-- Canonical position notation
-- Position database
+- **Canonical encoding deliberately kept out of Phase 1 entirely** —
+  there's no useful canonical-form work possible against a topology
+  that's always exactly one region, so this has a hard dependency on
+  v0.9.2 existing and being trustworthy, not just a sequencing
+  preference. Also mirrors, in reverse, the reasoning that justified
+  building Game Record serialisation early at v0.8.5 (build persistence
+  while the state underneath is simple) — canonical encoding should be
+  built once the topology underneath is complete and stable, not while
+  it's still being proven correct
+- `canonical.js` consumes the finished topological model and produces
+  canonical strings inspired by the published sr(P) representation: per
+  land → per region → per boundary → cyclic sequence of vertex visits
 - Position comparison and search
 - `canonical.js` and `hash.js` (currently stubbed) implemented
 

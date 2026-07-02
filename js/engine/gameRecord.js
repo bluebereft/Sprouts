@@ -1,5 +1,5 @@
 /* ================================================================
-   gameRecord.js — Sprouts Engine Game Records (v0.8.6)
+   gameRecord.js — Sprouts Engine Game Records (v0.9)
 
    Responsibility
    ──────────────
@@ -51,11 +51,12 @@
    No DOM. No browser APIs beyond JSON, which is standard JS, not a
    browser-specific API — this file runs identically under Node.
 
-   Depends on: reducer.js, rules.js
+   Depends on: reducer.js, rules.js, regions.js
    ================================================================ */
 
 import { applyMove } from './reducer.js';
 import { validateMove } from './rules.js';
+import { buildInitialTopology } from './regions.js';
 
 /** Current Game Record format version. Bump when the shape changes. */
 export const FORMAT_VERSION = 1;
@@ -88,7 +89,8 @@ function buildInitialDots(count) {
 /**
  * Builds a fresh engine state object from a (already shape-validated)
  * Game Record's starting parameters. Matches exactly what ui.js's
- * startGame() constructs for an ordinary new game.
+ * startGame() constructs for an ordinary new game, including the
+ * starting topology (v0.9).
  *
  * @param {{ initialDotCount: number, startingPlayer: number }} record
  * @returns {object} fresh engine state
@@ -102,6 +104,7 @@ function buildInitialState(record) {
     currentPlayer:   record.startingPlayer,
     initialDotCount: record.initialDotCount,
     startingPlayer:  record.startingPlayer,
+    ...buildInitialTopology(record.initialDotCount),
   };
 }
 

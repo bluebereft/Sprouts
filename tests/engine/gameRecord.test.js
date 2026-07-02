@@ -1,5 +1,5 @@
 /* ================================================================
-   tests/engine/gameRecord.test.js — Sprouts v0.8.6
+   tests/engine/gameRecord.test.js — Sprouts v0.9
 
    Tests for js/engine/gameRecord.js — pure Game Record export,
    import, and round-trip replay.
@@ -10,12 +10,17 @@
    build their own fixtures the same way (direct applyMove() calls),
    never importing engine.js, so this file has no shared-singleton
    ordering concerns the way tests/engine/engine.test.js does.
+
+   v0.9: fixtures now seed topology (regions/boundaries) via
+   buildInitialTopology(), matching exactly what a real game's
+   starting state looks like post-v0.9 — see freshState() below.
    ================================================================ */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { applyMove } from '../../js/engine/reducer.js';
 import { createMove } from '../../js/engine/move.js';
+import { buildInitialTopology } from '../../js/engine/regions.js';
 import {
   FORMAT_VERSION,
   ImportError,
@@ -34,6 +39,7 @@ function freshState() {
     currentPlayer: 0,
     initialDotCount: 3,
     startingPlayer: 0,
+    ...buildInitialTopology(3),
   };
 }
 
@@ -102,6 +108,22 @@ test('round trip: reproduces identical dots, edges, and currentPlayer', () => {
   assert.equal(result.state.currentPlayer, original.currentPlayer);
 });
 
+test('round trip: reproduces identical starting topology (regions, boundaries)', () => {
+  // v0.9 — regions/boundaries are derived state, same as dots/edges:
+  // never persisted in the Game Record itself, only re-seeded from
+  // initialDotCount on import. This confirms that re-seeding produces
+  // a structurally identical starting topology to the original game's,
+  // which it must, since both are built by the same buildInitialTopology()
+  // given the same initialDotCount.
+  const original = playTwoMoves();
+  const result = importGame(exportGame(original));
+
+  assert.deepEqual(result.state.regions, original.regions);
+  assert.deepEqual(result.state.boundaries, original.boundaries);
+  assert.equal(result.state.nextRegionId, original.nextRegionId);
+  assert.equal(result.state.nextBoundaryId, original.nextBoundaryId);
+});
+
 test('round trip: reproduces edges with matching originatingMoveIndex', () => {
   // v0.8.6 — edge provenance must survive a full export/import cycle,
   // since renderer.js now depends on it entirely (no positional
@@ -129,6 +151,7 @@ test('round trip: works for a game with startingPlayer 1', () => {
     dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
     edges: [], nextDotId: 2, moves: [],
     currentPlayer: 1, initialDotCount: 2, startingPlayer: 1,
+    ...buildInitialTopology(2),
   };
   state = applyMove(state, createMove(0, 1));
 

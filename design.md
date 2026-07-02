@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.8.6 (architecture review follow-up — edge provenance, gameRecord decoupled from Engine)
+Last updated: v0.9 (topological data model — regions/boundaries seeded, no mutation logic yet)
 
 ## Philosophy
 
@@ -30,17 +30,20 @@ Introduced at v0.8.1. Uses Node's built-in `node:test` and
 `tests/engine/rules.test.js` ↔ `js/engine/rules.js`,
 `tests/engine/engine.test.js` ↔ `js/engine/engine.js`,
 `tests/engine/reducer.test.js` ↔ `js/engine/reducer.js`,
-`tests/engine/gameRecord.test.js` ↔ `js/engine/gameRecord.js`. The test
-file for any source file is always at the same relative path under
-`tests/`.
+`tests/engine/gameRecord.test.js` ↔ `js/engine/gameRecord.js`,
+`tests/engine/regions.test.js` ↔ `js/engine/regions.js` (v0.9 — data
+model only so far; see "Topological Model" below for the query and
+mutation tests still to come). The test file for any source file is
+always at the same relative path under `tests/`.
 
 Only the pure, zero-DOM layer is covered this way: `engine/rules.js`,
 `engine/engine.js`, `engine/reducer.js`, `engine/move.js`,
-`engine/gameRecord.js`, and (candidates, not yet written)
-`pathSimplify.js`, `crossingDetection.js`. `renderer.js`, `ui.js`,
-`drawInteraction.js`, `boardView.js`, and `selectionState.js` all touch
-the DOM directly and are out of scope for this harness — they would
-need a DOM shim (e.g. jsdom) to run under Node, which hasn't been added.
+`engine/gameRecord.js`, `engine/regions.js`, and (candidates, not yet
+written) `pathSimplify.js`, `crossingDetection.js`. `renderer.js`,
+`ui.js`, `drawInteraction.js`, `boardView.js`, and `selectionState.js`
+all touch the DOM directly and are out of scope for this harness — they
+would need a DOM shim (e.g. jsdom) to run under Node, which hasn't
+been added.
 
 This is a useful validation of the architecture, not just a testing
 convenience: `engine.js` and `rules.js` run and test correctly under
@@ -231,6 +234,10 @@ Current engine state shape:
   currentPlayer:    0 | 1,
   initialDotCount:  number,   // v0.8.5 — how many dots the game started with
   startingPlayer:   0 | 1,    // v0.8.5 — which player moved first
+  regions:          [{ id, boundaries: [boundaryId, ...] }, ...],   // v0.9
+  boundaries:       [{ id, vertices: [dotId, ...] }, ...],          // v0.9
+  nextRegionId:     number,   // v0.9 — next unused region id
+  nextBoundaryId:   number,   // v0.9 — next unused boundary id
 }
 ```
 
@@ -249,13 +256,26 @@ the mathematical game state — they live in boardView.
 **`move.js`** — `createMove(startDotId, endDotId, regionId = 0)` factory.
 `regionId` identifies which region of the position the curve was drawn
 through (see "Canonical Position Representation" below). Defaults to 0
-since `engine/regions.js` is currently a stub.
+since `getRegionForDot` still always returns 0 — real region tracking
+exists as data (v0.9) but not yet as query logic (v0.9.1) or mutation
+(v0.9.2).
 
-**`regions.js`** — pure combinatorial region model. v0.7: a stub —
-`getRegionForDot()` always returns 0, since no move has yet split the
-single starting region. The interface is stable now so v0.9 only needs
-to replace the function body with real region-splitting logic; no other
-file needs to change shape when that happens.
+**`regions.js`** — pure combinatorial region model. As of v0.9, this
+holds real DATA (`regions`, `boundaries`, `nextRegionId`,
+`nextBoundaryId` on engine state — see shape above) but no mutation
+logic yet — the topological model is real and correctly seeded, but
+nothing splits it. `buildInitialTopology(dotCount)` seeds the starting
+position: one region containing one boundary PER DOT (not one shared
+boundary), since a boundary is a cyclic walk along real edges and
+there are none yet — see "Topological Model" below for why this
+matters. `getRegionForDot()`'s body is still the v0.7 stub (always
+returns 0) and remains behaviourally correct throughout v0.9, since
+only region 0 exists until real splitting logic exists. Reserved,
+not-yet-implemented query functions (`getBoundaryForDot`,
+`areDotsInSameRegion`, `areDotsOnSameBoundary`, a `checkInvariants`
+structural checker) and the splitting algorithm itself are tracked
+separately in ROADMAP.md as v0.9.1/v0.9.2/v0.9.3 — deliberately not
+bundled into one version; see "Topological Model" below for why.
 
 **`gameRecord.js`** — pure export/import of Game Records (v0.8.5,
 decoupled from `Engine` at v0.8.6). See "Persistence" below for the
@@ -579,3 +599,125 @@ move order. Edges render as straight lines entirely through
 `renderer.js`'s existing "no recorded path" fallback in `renderEdges()`
 — built defensively back at v0.7 for a case that hadn't occurred yet,
 now serving its first real purpose.
+
+
+---
+
+## Topological Model (v0.9)
+
+### From graph to embedded planar graph
+
+Through v0.8.x the engine represented a plain graph: vertices and
+edges, nothing more. v0.9 begins moving it to an **embedded planar
+graph** — vertices, edges, faces (regions), and boundary cycles. This
+is a different kind of mathematical object, not a richer version of
+the same one. Concepts like Euler's formula, face-counting, and
+boundary traversal only have meaning once an embedding exists; they
+don't generalise from the plain-graph model at all. Every reducer
+change from v0.9 onward operates on this different object, which is
+why the v0.8.6 architecture review's note about the reducer's "flat,
+easy-to-audit character" not surviving unchanged is treated as a
+structural warning, not a minor caveat.
+
+### Why v0.9 was unbundled into sub-versions
+
+The original plan bundled four distinct mathematical capabilities
+into one version: the data model, pure query functions, the
+mutation/splitting algorithm, and region-aware legality. A design
+review concluded these are separate problems and should be separate
+milestones — see ROADMAP.md's v0.9/v0.9.1/v0.9.2/v0.9.3 breakdown for
+the full scope of each.
+
+The load-bearing reason, not just "keep versions small": **putting
+pure queries (v0.9.1) before mutation (v0.9.2) gives an independent
+verification oracle for the hard algorithm before the hard algorithm
+exists.** v0.9.1's queries get tested against hand-constructed
+multi-region fixtures — built by hand, never produced by any
+splitting algorithm, since none will exist yet. When v0.9.2's
+algorithm is written, its output is checked against v0.9.1's
+already-trusted queries, rather than needing to trust the queries and
+the algorithm simultaneously.
+
+Canonical string encoding (`canonical.js`) was deliberately kept
+entirely out of Phase 1, not just sequenced later within it — see
+Phase 2 in ROADMAP.md. There's no useful canonical-form work possible
+against a topology that's always exactly one region, so this is a
+hard dependency on v0.9.2 existing and being trustworthy, not a
+scheduling preference.
+
+### Starting topology: one boundary per dot, not one shared boundary
+
+`buildInitialTopology(dotCount)` (v0.9) seeds every fresh game with
+**one region containing one boundary per dot**, each boundary of
+length 1 — not one boundary holding every dot. A boundary is a cyclic
+walk along real edges. With zero edges at game start there is no walk
+connecting separate dots into anything, so each isolated dot is
+trivially its own boundary.
+
+This isn't a minor implementation detail — it's required for Euler's
+formula to hold at the starting position, which is the first thing
+v0.9.1's invariant checker will verify: `V − E + F = 1 + C`, where `C`
+is the number of connected components. At game start, `V = N` (dots),
+`E = 0`, `C = N` (each isolated dot is its own component), `F = 1`
+(one region). Checking: `1 + N = N − 0 + 1` holds. `C = N` requires
+`N` boundaries to exist, not one — seeding one shared boundary would
+make this invariant fail on the very first position anyone checks it
+against.
+
+### Split vs. merge — two operations, not one algorithm
+
+Recalled from the Čížek & Balko paper (Graph Drawing 2021) and
+scheduled for re-verification before v0.9.2 is implemented, not taken
+on faith: a move within a region is one of two topologically distinct
+operations.
+
+- **Single-boundary move** — both endpoints already lie on the same
+  boundary. This SPLITS that boundary, and its region, into two.
+- **Double-boundary move** — the endpoints lie on two *different*
+  boundaries within the same region. This MERGES those two boundaries
+  into one, with no region split at all.
+
+These aren't variations of one function with a branch inside — they
+have different topological effects and should get independent
+design, independent tests, and independent verification against the
+source material. v0.9.2's plan is to implement and fully test the
+split case first, then the merge case, each checked against v0.9.1's
+`checkInvariants` before moving on.
+
+Whether a self-loop reduces to the single-boundary case naturally, or
+needs distinct handling the way it already does for lives arithmetic
+in `reducer.js` (`isLoop` branch), is an open question for the
+literature pass, not yet assumed either way.
+
+### Essential invariants (destination: v0.9.1's `checkInvariants`)
+
+Split by confidence, since "don't implement from memory" applies here
+too:
+
+**General graph theory, confident without re-verification:**
+- Euler's formula `V − E + F = 1 + C`, checked after every mutation
+- Every dot belongs to exactly one boundary — never zero, never more
+  than one
+- Every boundary belongs to exactly one region
+- A boundary's cyclic vertex sequence corresponds to a real closed
+  walk along edges that actually exist — not an arbitrary list that
+  happens to include the right vertices
+- The existing total-lives invariant (v0.8.6: total lives across all
+  dots decreases by exactly 1 per move) — orthogonal to topology, but
+  worth re-asserting as a cross-check once mutation logic touches the
+  same reducer function, since it was correct before regions existed
+  and has no reason to stop being correct now
+
+**Needs the literature pass to confirm precisely:**
+- Exact bookkeeping convention for how self-loops and trivial
+  single-vertex boundaries factor into Euler's formula in degenerate
+  cases
+- Whether every edge borders exactly two region-sides (standard
+  planar embedding convention) or whether a Sprouts-specific
+  structure (e.g. a bridge edge) needs special treatment
+- The precise structural mechanics of the split/merge distinction
+  above
+- Whether "lands" (independent connected components) belong in the
+  engine's topological model at all, or are better understood as a
+  canonicalisation-layer concept (expressing a position as a sum of
+  independent subgames) that the engine itself doesn't need to track
