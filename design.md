@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.8.1 (Node test harness — tests/ mirrors js/ source layout)
+Last updated: v0.8.5 (Game Record serialisation — see "Persistence")
 
 ## Philosophy
 
@@ -73,14 +73,19 @@ UI  (ui.js)                              — orchestration, status, turn indicat
  │     never passed to the engine
  │
  ├── Engine          (engine/engine.js)   — stateful wrapper around reducer
- │    ├── Reducer    (engine/reducer.js)  — pure game state transitions
- │    ├── Rules      (engine/rules.js)    — pure game rule functions
- │    └── Regions    (engine/regions.js)  — combinatorial region model (stub)
+ │    ├── Reducer      (engine/reducer.js)   — pure game state transitions
+ │    ├── Rules        (engine/rules.js)     — pure game rule functions
+ │    ├── Regions      (engine/regions.js)   — combinatorial region model (stub)
+ │    └── GameRecord   (engine/gameRecord.js)— pure export/import via Engine.apply
  │
  └── Renderer        (renderer.js)        — SVG board
       reads from SelectionState and BoardView
       never reads from engine directly
       └── SVG
+
+GameRecordUI (gameRecordUI.js)             — thin DOM layer, separate from ui.js
+ ├── engine/gameRecord.js                  — export/import logic
+ └── ui.js (loadImportedGame)              — visual rebuild on successful import
 ```
 
 The engine layer contains only pure game logic.
@@ -191,13 +196,24 @@ reason about, test, and reuse for replay.
 Current engine state shape:
 ```js
 {
-  dots:          [{ id, lives }, ...],
-  edges:         [{ a, b }, ...],
-  moves:         [{ startDotId, endDotId }, ...],
-  nextDotId:     number,
-  currentPlayer: 0 | 1,
+  dots:             [{ id, lives }, ...],
+  edges:            [{ a, b }, ...],
+  moves:            [{ startDotId, endDotId, regionId }, ...],
+  nextDotId:        number,
+  currentPlayer:    0 | 1,
+  initialDotCount:  number,   // v0.8.5 — how many dots the game started with
+  startingPlayer:   0 | 1,    // v0.8.5 — which player moved first
 }
 ```
+
+`initialDotCount` and `startingPlayer` are set once at `Engine.init()`
+and never change for the life of a game — the reducer's `...state`
+spread carries them forward on every move automatically, without the
+reducer needing to know they exist. They exist specifically so
+`engine/gameRecord.js`'s `exportGame()` can read them directly rather
+than trying to reverse-derive them from other fields (e.g. `currentPlayer`
+and `moves.length`) via modular arithmetic that would be correct today
+but fragile against any future rule change to turn alternation.
 
 Note: engine dots have no x or y. Screen coordinates are not part of
 the mathematical game state — they live in boardView.
@@ -212,6 +228,16 @@ since `engine/regions.js` is currently a stub.
 single starting region. The interface is stable now so v0.9 only needs
 to replace the function body with real region-splitting logic; no other
 file needs to change shape when that happens.
+
+**`gameRecord.js`** — pure export/import of Game Records (v0.8.5).
+See "Persistence" below for the full design. `exportGame(state)` /
+`exportGameToJSON(state)` read the four persisted fields directly off
+engine state. `importGame(record)` / `importGameFromJSON(json)` replay
+a record's moves through `Engine.apply()` — the exact function ordinary
+play uses, never a separate validation path — snapshotting whatever
+Engine currently holds and restoring it if any move turns out illegal,
+so a failed import can never corrupt or silently replace a game already
+in progress.
 
 **`canonical.js`**, **`hash.js`** — stubbed, for Phase 2.
 
@@ -285,6 +311,26 @@ movement, removes this dependency entirely.
 Does not modify game state, update status text, or know about the
 engine beyond reading existing edge paths from BoardView for crossing
 checks.
+
+---
+
+### GameRecordUI (`js/gameRecordUI.js`)
+
+Minimal browser-facing wiring for exporting/importing Game Records
+(v0.8.5). Thin DOM layer only — reads/writes two textareas and two
+buttons. All actual logic is delegated: `engine/gameRecord.js` for pure
+export/import/replay, `ui.js`'s `loadImportedGame()` for rebuilding the
+visible board after a successful import.
+
+Kept as its own file rather than folded into `ui.js`, for the same
+reason `drawInteraction.js` was split out at v0.7.1 — `ui.js` stays
+focused on orchestrating the active game; this file owns one small,
+separable concern and nothing else.
+
+Translates `engine/gameRecord.js`'s coded `ImportError` values into
+player-facing text locally, the same pattern `ui.js`'s
+`VIOLATION_MESSAGES` uses for `RuleError` — the engine layer never
+emits English strings.
 
 ---
 
@@ -401,3 +447,80 @@ Path endpoints are snapped to exact dot centers on commit, so every
 stored path begins and ends precisely at a dot's position regardless
 of where within the dot's radius the player clicked. This improves
 both visual tidiness and crossing-detection accuracy.
+
+---
+
+## Persistence (v0.8.5)
+
+### A Game Record describes a game, not an engine snapshot
+
+The persisted format is a **Game Record** — a description of what
+happened in a game — not a serialized snapshot of the engine's internal
+state at one moment. This distinction matters: the engine's internal
+representation is an implementation detail that has already changed
+several times (v0.5 removed coordinates from engine dots; v0.7 added
+`regionId`; v0.9 will add region/boundary tracking) and will keep
+changing. A persistence format tied to that representation would need
+migration logic every time it does. A format that only describes the
+game's actual parameters and the sequence of moves made does not.
+
+The persisted shape:
+```js
+{
+  formatVersion:   1,
+  initialDotCount: number,
+  startingPlayer:  0 | 1,
+  moves:           [{ startDotId, endDotId, regionId }, ...],
+}
+```
+
+Deliberately **not** persisted: `dots`, `edges`, `nextDotId`,
+`currentPlayer`. All four are fully derivable by replaying `moves`
+through the real engine starting from `initialDotCount`/`startingPlayer`
+— storing them would be storing the same information twice, in a form
+tied to the engine's current shape rather than the game's actual
+description. If a future performance need ever justifies it (very long
+games making full replay costly), an optional snapshot cache could be
+added as an addition to the format, not a replacement for this
+principle — not currently justified, since engine state stays simple
+through at least v0.9.
+
+**Why `initialDotCount` is a bare integer, not a dot array.** In classic
+Sprouts the starting position is entirely defined by the rules — N dots,
+each with 3 lives — given one number. An array of `{ id, lives }`
+objects would be recording something derivable, dressed up as if it
+were data: exactly the "mirroring the engine's internal representation"
+the Game Record format exists to avoid. A future variant with genuinely
+custom starting positions (not currently planned) would add a new
+`startingPosition`/`game` section to the format, rather than promoting
+this field into something it was never meant to describe.
+
+### Import replays through the real engine, not a parallel validator
+
+`importGame()` does not re-implement legality checking. It replays every
+move in the record through `Engine.apply()` — the identical function
+ordinary play uses — so a Game Record's legality is checked by exactly
+one code path, the same one that already rejects an illegal move drawn
+by a human player. There is deliberately no second, independent notion
+of "is this move sequence legal" anywhere in the codebase.
+
+Before replaying, `importGame()` snapshots whatever the `Engine`
+singleton currently holds. If any move in the record turns out illegal,
+that snapshot is restored before returning failure — so a bad or
+hand-edited paste can never corrupt or silently replace a game already
+in progress. This mirrors, at the scale of a whole game, the same
+unchanged-state-on-failure guarantee `Engine.apply()` already provides
+for a single move.
+
+### Rendering an imported game has no original geometry to restore
+
+A Game Record deliberately stores no drawn curve geometry — only
+topology. Loading one therefore cannot reproduce the original hand-drawn
+curves, because that information was never captured. `ui.js`'s
+`loadImportedGame()` invents placeholder geometry instead: initial dots
+use the same even-row layout as a fresh game, and each sprout is placed
+at the straight-line midpoint of its move's two endpoints, computed in
+move order. Edges render as straight lines entirely through
+`renderer.js`'s existing "no recorded path" fallback in `renderEdges()`
+— built defensively back at v0.7 for a case that hadn't occurred yet,
+now serving its first real purpose.

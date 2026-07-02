@@ -1,5 +1,5 @@
 /* ================================================================
-   renderer.js — Sprouts v0.8
+   renderer.js — Sprouts v0.8.5
 
    Responsibility
    ──────────────
@@ -249,10 +249,15 @@ const Renderer = (() => {
   /**
    * Redraws all edges from current engine state, reading each edge's
    * path from BoardView. Falls back to a straight line between the
-   * two dot positions if no path was recorded (defensive; should not
-   * occur once drawing is fully wired through ui.js).
+   * two dot positions if no path was recorded — this is the normal
+   * case for an imported Game Record, which stores no drawn geometry
+   * at all (see engine/gameRecord.js), not just a defensive fallback.
    *
-   * Derives player for each edge from move index via playerForMove().
+   * Derives player for each edge from move index via playerForMove(),
+   * reading engineState.startingPlayer rather than assuming the
+   * default (player 0) — a freshly-started game always has
+   * startingPlayer 0, but an imported Game Record can specify
+   * startingPlayer 1, and edges must be coloured correctly either way.
    * Each move produces exactly 2 edges, so:
    *   moveIndex = Math.floor(edgeIndex / 2)
    *
@@ -265,7 +270,7 @@ const Renderer = (() => {
 
     engineState.edges.forEach((edge, edgeIndex) => {
       const moveIndex = Math.floor(edgeIndex / 2);
-      const player    = playerForMove(moveIndex);
+      const player    = playerForMove(moveIndex, engineState.startingPlayer ?? 0);
       const path      = BoardView.getEdgePath(moveIndex);
 
       if (path) {

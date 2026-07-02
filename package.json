@@ -1,6 +1,6 @@
 {
   "name": "sprouts-lab",
-  "version": "0.8.1",
+  "version": "0.8.5",
   "private": true,
   "type": "module",
   "description": "Sprouts Lab — browser-based Sprouts research platform",

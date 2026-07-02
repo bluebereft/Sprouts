@@ -1,5 +1,5 @@
 /* ================================================================
-   ui.js — Sprouts v0.8
+   ui.js — Sprouts v0.8.5
 
    Responsibility
    ──────────────
@@ -238,7 +238,7 @@ const UI = (() => {
     const engineStateBefore = Engine.getState();
     const regionId     = getRegionForDot(engineStateBefore, a);
     const moveIndex    = engineStateBefore.moves.length;
-    const actingPlayer = playerForMove(moveIndex);
+    const actingPlayer = playerForMove(moveIndex, engineStateBefore.startingPlayer ?? 0);
 
     const move = createMove(a, b, regionId);
     const result = Engine.apply(move);
@@ -302,11 +302,13 @@ const UI = (() => {
     Renderer.initBoard(board);
 
     Engine.init({
-      dots:          SelectionState.getDots().map(({ id, lives }) => ({ id, lives })),
-      edges:         [],
-      nextDotId:     count,
-      moves:         [],
-      currentPlayer: 0,
+      dots:            SelectionState.getDots().map(({ id, lives }) => ({ id, lives })),
+      edges:           [],
+      nextDotId:       count,
+      moves:           [],
+      currentPlayer:   0,
+      initialDotCount: count,
+      startingPlayer:  0,
     });
 
     DrawInteraction.reset();
@@ -315,6 +317,78 @@ const UI = (() => {
     updateTurnIndicator(0);
     syncDrawMode();
     setStatus('Select first endpoint.');
+    renderMoveList();
+  }
+
+  // ── Loading an imported game ────────────────────────────────────
+
+  /**
+   * Rebuilds the board to display a game reconstructed by
+   * engine/gameRecord.js's importGame(). Called by gameRecordUI.js
+   * after a successful import.
+   *
+   * Game Records deliberately do not store drawn curve geometry —
+   * only topology is recorded (see design.md "Persistence"). So this
+   * function invents PLACEHOLDER geometry for the imported game:
+   * initial dots use the same even-row layout as a fresh game via
+   * SelectionState.initDots(); each sprout dot is placed at the
+   * straight-line midpoint of the two dots its originating move
+   * connected, computed in move order so a later sprout can
+   * reference an earlier sprout's now-known position.
+   *
+   * Edges are drawn as straight lines entirely via Renderer.
+   * renderEdges()'s existing "no recorded path" fallback —
+   * BoardView.getEdgePath() returns null for every imported move,
+   * since no path was ever captured for it, and that fallback was
+   * already built (defensively, at v0.7) for exactly this case. No
+   * new edge-drawing logic was needed here.
+   *
+   * @param {object} engineState — state returned by a successful importGame()
+   */
+  function loadImportedGame(engineState) {
+    const boardW = parseFloat(boardEl.getAttribute('width'));
+    const boardH = parseFloat(boardEl.getAttribute('height'));
+    const initialDotCount = engineState.initialDotCount;
+
+    SelectionState.initDots(initialDotCount, boardW, boardH);
+    BoardView.reset();
+    SelectionState.getDots().forEach(dot => {
+      BoardView.setDotPosition(dot.id, dot.x, dot.y);
+    });
+
+    Renderer.initBoard(boardEl);
+
+    // Place each sprout at the straight-line midpoint of its move's
+    // two endpoints, strictly in move order, so a move referencing
+    // an earlier sprout can read that sprout's already-set position.
+    engineState.moves.forEach((move, index) => {
+      const sprout = engineState.dots[initialDotCount + index];
+      if (!sprout) return; // defensive; should not happen for a valid record
+
+      const posA = BoardView.getDotPosition(move.startDotId);
+      const posB = BoardView.getDotPosition(move.endDotId);
+      const midX = (posA.x + posB.x) / 2;
+      const midY = (posA.y + posB.y) / 2;
+      BoardView.setDotPosition(sprout.id, midX, midY);
+
+      const player = playerForMove(index, engineState.startingPlayer ?? 0);
+      Renderer.addDot(sprout, initialDotCount + index, player);
+    });
+
+    Renderer.syncDotStates(engineState);
+    Renderer.renderEdges(engineState);
+
+    DrawInteraction.reset();
+    boardEl.classList.remove('board--drawing', 'board--rejected');
+    SelectionState.clearSelections();
+    Renderer.updateSelection(
+      { first: null, second: null },
+      { first: null, second: null }
+    );
+
+    updateTurnIndicator(engineState.currentPlayer);
+    syncDrawMode();
+    setStatus('Game imported. Select first endpoint.');
     renderMoveList();
   }
 
@@ -349,10 +423,14 @@ const UI = (() => {
     startGame(select, board);
   }
 
-  return { init };
+  return { init, loadImportedGame };
 
 })();
 
 export function init() {
   return UI.init();
+}
+
+export function loadImportedGame(engineState) {
+  return UI.loadImportedGame(engineState);
 }

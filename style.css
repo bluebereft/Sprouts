@@ -1,5 +1,5 @@
 /* ================================================================
-   style.css — Sprouts v0.7
+   style.css — Sprouts v0.8.5
    
    Design tokens are declared as CSS custom properties at the top.
    Everything else references those tokens so future reskins are easy.
@@ -343,4 +343,98 @@ body {
 
 .board--rejected {
   animation: board-reject-flash 0.3s ease-out;
+}
+
+/* ── Secondary button (v0.8.5 — reintroduced) ──────────────────── */
+/*
+  Removed at v0.7.1 as dead code (the old Create Move button that
+  used it was gone). Reintroduced here for a genuine new use: the
+  Export/Import buttons in the Game Record section. Same pill shape
+  and height as .btn-primary, but outlined rather than filled, so it
+  reads as a secondary action alongside Start Game.
+*/
+.btn-secondary {
+  height: var(--control-height);
+  padding: 0 var(--control-px);
+  border-radius: var(--control-radius);
+  border: 1.5px solid var(--color-accent);
+  background: transparent;
+  color: var(--color-accent);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease,
+              box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+.btn-secondary:hover {
+  background: var(--color-accent);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(79, 109, 90, 0.25);
+}
+
+.btn-secondary:active { transform: scale(0.97); box-shadow: none; }
+.btn-secondary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(79, 109, 90, 0.3); }
+
+/* ── Game Record section (v0.8.5) ──────────────────────────────── */
+.game-record-section {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.game-record-section__title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.game-record-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.game-record-textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--color-border);
+  background: var(--board-bg);
+  color: var(--color-text);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.game-record-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(79, 109, 90, 0.15);
+}
+
+.game-record-textarea::placeholder {
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+}
+
+/* Export's textarea is read-only — subdue the cursor affordance. */
+.game-record-textarea[readonly] {
+  cursor: default;
+}
+
+.game-record-status {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  min-height: 1.25em;
 }

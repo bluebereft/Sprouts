@@ -75,6 +75,43 @@
       </section>
       <!-- /move-list -->
 
+      <!-- ─── Game Record: export / import ───────────────────────── -->
+      <!--
+        Minimal copy/paste UI over engine/gameRecord.js.
+        Export reads the live engine state and displays its Game
+        Record JSON for the player to copy. Import reads pasted JSON,
+        replays it through the real engine (Engine.apply — the same
+        function ordinary play uses), and on success rebuilds the
+        board via UI.loadImportedGame(). All wiring lives in
+        gameRecordUI.js, kept separate from ui.js.
+      -->
+      <section class="game-record-section">
+        <h2 class="game-record-section__title">Game Record</h2>
+
+        <div class="game-record-block">
+          <label class="control-label" for="export-output">Export</label>
+          <textarea
+            id="export-output"
+            class="game-record-textarea"
+            readonly
+            placeholder="Click Export to show this game's record here."
+          ></textarea>
+          <button id="export-btn" class="btn-secondary">Export</button>
+        </div>
+
+        <div class="game-record-block">
+          <label class="control-label" for="import-input">Import</label>
+          <textarea
+            id="import-input"
+            class="game-record-textarea"
+            placeholder="Paste a game record JSON here."
+          ></textarea>
+          <button id="import-btn" class="btn-secondary">Import</button>
+          <p id="import-status" class="game-record-status"></p>
+        </div>
+      </section>
+      <!-- /game-record -->
+
     </div>
     <!-- /card -->
 
@@ -94,6 +131,9 @@
                       → engine/engine.js → engine/reducer.js
                       → engine/move.js, engine/rules.js, engine/regions.js
                       → models.js
+      app.js → gameRecordUI.js → engine/engine.js
+                                → engine/gameRecord.js → engine/engine.js
+                                → ui.js (loadImportedGame)
   -->
   <script type="module" src="js/app.js"></script>
 

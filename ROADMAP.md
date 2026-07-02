@@ -211,11 +211,75 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
   argument (relying on Node's default recursive `**/*.test.js` discovery)
   works correctly and is what `npm test` now runs
 
-### v0.8.5 — Save / Load
-- Serialise engine state + boardView paths to JSON
-- Save to file download
-- Load and restore full visual and game state
-- Foundation for replay (replay = load + re-apply moves)
+### v0.8.5 — Game Record Serialisation ✅
+- Reframed from "browser save/load" to **engine serialisation** per tech
+  lead review: the saved format describes a game (what happened), not a
+  snapshot of the engine's internal representation at one moment
+- Decided the exact persisted shape before implementing (see design.md
+  "Persistence"): `formatVersion`, `initialDotCount`, `startingPlayer`,
+  and the ordered `moves` array — deliberately NOT `dots`, `edges`,
+  `nextDotId`, or `currentPlayer`, all of which are fully derivable by
+  replaying `moves` through the real engine
+- `initialDotCount` kept as a bare integer, not an array of dot objects —
+  in classic Sprouts the starting position is defined entirely by the
+  rules (N dots, 3 lives each) given one number; promoting it to an array
+  of engine-shaped objects would mirror the engine's internal
+  representation rather than describe the game's actual parameters. A
+  future variant with genuinely custom starting positions would extend
+  the record with a new `startingPosition`/`game` section, not repurpose
+  this field
+- `engine/gameRecord.js` (new, pure, zero DOM) —
+  `exportGame(state)` / `exportGameToJSON(state)`,
+  `importGame(record)` / `importGameFromJSON(json)`.
+  `importGame` replays every move through `Engine.apply()` — the exact
+  function ordinary play uses — so a Game Record's legality is checked by
+  the same code path as a human player's move, never a second,
+  independent implementation of the rules
+- `importGame` snapshots whatever Engine currently holds before replay and
+  restores it if any move in the record turns out illegal, so a failed
+  import never corrupts or silently replaces a game already in progress
+- `ImportError` enum (`INVALID_FORMAT_VERSION`, `INVALID_RECORD_SHAPE`,
+  `ILLEGAL_MOVE`) — coded, same pattern as `RuleError`; `gameRecordUI.js`
+  translates codes to player-facing text, the engine never emits prose
+- `engine.js`'s `init()` unchanged — `initialDotCount`/`startingPlayer`
+  are just additional fields on whatever object is passed in, since
+  `init()` already spreads its argument
+- Bug found and fixed during this work: `renderer.js`'s `renderEdges()`
+  and `ui.js`'s `commitMove()` both derived edge/move player colour via
+  `playerForMove(moveIndex)` using its default `startingPlayer = 0`,
+  never reading the real value from engine state. Harmless while every
+  game always started at player 0, but would have silently mis-coloured
+  every edge of an imported game with `startingPlayer: 1`. Both now read
+  `state.startingPlayer` explicitly
+- `ui.js` — new `loadImportedGame(engineState)`, exposed from its public
+  API. Game Records store no drawn curve geometry (only topology), so
+  this invents placeholder layout for an imported game: initial dots use
+  the same even-row layout as a fresh game; each sprout is placed at the
+  straight-line midpoint of its move's two endpoints, computed in move
+  order. Edges render as straight lines via `renderEdges()`'s existing
+  "no recorded path" fallback — built defensively at v0.7, now serving
+  its first real purpose
+- `js/gameRecordUI.js` (new) — minimal copy/paste browser UI: Export
+  button populates a read-only textarea with the current game's JSON;
+  Import textarea + button calls `importGameFromJSON`, shows a coded
+  error inline on failure, or calls `ui.js`'s `loadImportedGame` on
+  success. Kept as its own file rather than added to `ui.js`, continuing
+  the precedent set by extracting `drawInteraction.js` at v0.7.1
+- `tests/engine/gameRecord.test.js` (17 tests) — round-trip fidelity
+  (export→import reproduces identical dots/edges/moves/currentPlayer,
+  including a `startingPlayer: 1` case), malformed-record rejection for
+  every shape check, illegal-move-sequence rejection with `moveIndex` and
+  `violations` reported, and the snapshot/restore guarantee itself:
+  a failed import leaves a previously in-progress game's engine state
+  byte-for-byte unchanged (verified via `assert.deepEqual` against the
+  pre-import state, and `assert.strictEqual` — same object reference —
+  for the malformed-shape case, which never touches Engine at all)
+- 46 tests total, all passing (29 from v0.8.1 + 17 new)
+- Deferred per tech lead: `pathSimplify.js`/`crossingDetection.js` tests
+  (valuable, but don't unlock roadmap items the way serialisation does —
+  candidate for the next maintenance milestone); an optional snapshot
+  cache in the persisted format, only if a future performance need
+  justifies it (not currently justified — engine state is still simple)
 
 ### v0.9 — Topological Model
 - Replace `engine/regions.js` stub with real region tracking
