@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.8.5 (Game Record serialisation — see "Persistence")
+Last updated: v0.8.6 (architecture review follow-up — edge provenance, gameRecord decoupled from Engine)
 
 ## Philosophy
 
@@ -28,16 +28,19 @@ Introduced at v0.8.1. Uses Node's built-in `node:test` and
 
 `tests/` mirrors the `js/` source layout exactly:
 `tests/engine/rules.test.js` ↔ `js/engine/rules.js`,
-`tests/engine/engine.test.js` ↔ `js/engine/engine.js`. The test file
-for any source file is always at the same relative path under `tests/`.
+`tests/engine/engine.test.js` ↔ `js/engine/engine.js`,
+`tests/engine/reducer.test.js` ↔ `js/engine/reducer.js`,
+`tests/engine/gameRecord.test.js` ↔ `js/engine/gameRecord.js`. The test
+file for any source file is always at the same relative path under
+`tests/`.
 
 Only the pure, zero-DOM layer is covered this way: `engine/rules.js`,
-`engine/engine.js`, `engine/reducer.js`, `engine/move.js`, and
-(candidates, not yet written) `pathSimplify.js`, `crossingDetection.js`.
-`renderer.js`, `ui.js`, `drawInteraction.js`, `boardView.js`, and
-`selectionState.js` all touch the DOM directly and are out of scope for
-this harness — they would need a DOM shim (e.g. jsdom) to run under
-Node, which hasn't been added.
+`engine/engine.js`, `engine/reducer.js`, `engine/move.js`,
+`engine/gameRecord.js`, and (candidates, not yet written)
+`pathSimplify.js`, `crossingDetection.js`. `renderer.js`, `ui.js`,
+`drawInteraction.js`, `boardView.js`, and `selectionState.js` all touch
+the DOM directly and are out of scope for this harness — they would
+need a DOM shim (e.g. jsdom) to run under Node, which hasn't been added.
 
 This is a useful validation of the architecture, not just a testing
 convenience: `engine.js` and `rules.js` run and test correctly under
@@ -53,6 +56,14 @@ caches ES module imports within a process, so every `test()` in
 `engine.test.js` shares the same `Engine` instance. Each test must
 call `Engine.init(...)` first to establish a known state before
 asserting anything.
+
+This gotcha does NOT apply to `reducer.test.js` or `gameRecord.test.js`
+(v0.8.6) — neither file imports `engine.js` at all. `reducer.test.js`
+calls `applyMove()` directly against a locally-constructed state
+object; `gameRecord.test.js` does the same to build its fixtures, and
+`gameRecord.js` itself has no Engine dependency to test around (see
+"Persistence" below for why). Only tests that specifically exercise
+`Engine`'s own wrapper behaviour need the reset discipline.
 
 ---
 
@@ -74,9 +85,13 @@ UI  (ui.js)                              — orchestration, status, turn indicat
  │
  ├── Engine          (engine/engine.js)   — stateful wrapper around reducer
  │    ├── Reducer      (engine/reducer.js)   — pure game state transitions
- │    ├── Rules        (engine/rules.js)     — pure game rule functions
- │    ├── Regions      (engine/regions.js)   — combinatorial region model (stub)
- │    └── GameRecord   (engine/gameRecord.js)— pure export/import via Engine.apply
+ │    └── Rules        (engine/rules.js)     — pure game rule functions
+ │
+ ├── GameRecord      (engine/gameRecord.js) — pure export/import; calls
+ │    ├── Reducer      (engine/reducer.js)     reducer.js + rules.js DIRECTLY,
+ │    └── Rules        (engine/rules.js)       never through the Engine singleton
+ │
+ ├── Regions         (engine/regions.js)   — combinatorial region model (stub)
  │
  └── Renderer        (renderer.js)        — SVG board
       reads from SelectionState and BoardView
@@ -84,8 +99,10 @@ UI  (ui.js)                              — orchestration, status, turn indicat
       └── SVG
 
 GameRecordUI (gameRecordUI.js)             — thin DOM layer, separate from ui.js
- ├── engine/gameRecord.js                  — export/import logic
- └── ui.js (loadImportedGame)              — visual rebuild on successful import
+ ├── engine/gameRecord.js                  — pure export/import/replay
+ ├── engine/engine.js                      — Engine.init(result.state) only
+ │                                            after a successful import
+ └── ui.js (loadImportedGame)              — visual rebuild
 ```
 
 The engine layer contains only pure game logic.
@@ -193,11 +210,22 @@ this by calling `validate()` before the reducer ever runs. Keeping the
 reducer an unconditional state transition is what makes it easy to
 reason about, test, and reuse for replay.
 
+Every edge it creates carries `originatingMoveIndex` (v0.8.6) — the
+position of the move that created it within this game's own move
+history (`state.moves.length` at creation time). This is explicit
+provenance, not a global move identifier: a move is an event within
+one playthrough, not a mathematical entity with independent identity,
+so the index is deliberately local/per-game, not a monotonic counter
+like `nextDotId`. Before this, the only way to know which move
+produced an edge was positional arithmetic (`floor(edgeIndex / 2)`),
+duplicated in `renderer.js` and implicitly assumed by `boardView.js`'s
+`edgePaths` map — now it's explicit data on the edge itself.
+
 Current engine state shape:
 ```js
 {
   dots:             [{ id, lives }, ...],
-  edges:            [{ a, b }, ...],
+  edges:            [{ a, b, originatingMoveIndex }, ...],
   moves:            [{ startDotId, endDotId, regionId }, ...],
   nextDotId:        number,
   currentPlayer:    0 | 1,
@@ -229,15 +257,16 @@ single starting region. The interface is stable now so v0.9 only needs
 to replace the function body with real region-splitting logic; no other
 file needs to change shape when that happens.
 
-**`gameRecord.js`** — pure export/import of Game Records (v0.8.5).
-See "Persistence" below for the full design. `exportGame(state)` /
-`exportGameToJSON(state)` read the four persisted fields directly off
-engine state. `importGame(record)` / `importGameFromJSON(json)` replay
-a record's moves through `Engine.apply()` — the exact function ordinary
-play uses, never a separate validation path — snapshotting whatever
-Engine currently holds and restoring it if any move turns out illegal,
-so a failed import can never corrupt or silently replace a game already
-in progress.
+**`gameRecord.js`** — pure export/import of Game Records (v0.8.5,
+decoupled from `Engine` at v0.8.6). See "Persistence" below for the
+full design. `exportGame(state)` / `exportGameToJSON(state)` read the
+four persisted fields directly off engine state. `importGame(record)` /
+`importGameFromJSON(json)` replay a record's moves by calling
+`validateMove()` and `applyMove()` directly — the exact same pure
+functions `Engine.apply()` itself calls internally — building a local
+state object and returning it. This file does not import `engine.js`
+at all, and has no effect on any live game unless the caller explicitly
+acts on a successful result (see `gameRecordUI.js`).
 
 **`canonical.js`**, **`hash.js`** — stubbed, for Phase 2.
 
@@ -251,7 +280,13 @@ to be used for browser play, bots, AI, and command-line testing.
 Draws the board. Reads from SelectionState (for selection highlights)
 and BoardView (for positions, paths, and player colours).
 
-Does not modify game state. Does not import from the engine directly.
+Does not modify game state. Does not import from the engine directly,
+except `engine/rules.js`'s `playerForMove` (a pure rule function, not
+the Engine singleton) to derive edge colours.
+
+`renderEdges()` groups edges by `originatingMoveIndex` (v0.8.6) rather
+than deriving that grouping from array position — see `reducer.js`'s
+entry above for why the positional version was a latent risk.
 
 Uses a retained element architecture — SVG circles are created once per
 game and kept alive. Only CSS classes and attributes change on updates.
@@ -321,6 +356,13 @@ Minimal browser-facing wiring for exporting/importing Game Records
 buttons. All actual logic is delegated: `engine/gameRecord.js` for pure
 export/import/replay, `ui.js`'s `loadImportedGame()` for rebuilding the
 visible board after a successful import.
+
+Since `gameRecord.js` no longer touches the `Engine` singleton at all
+(v0.8.6), this file is the one place that decides whether a
+successfully-imported record becomes the live game — it calls
+`Engine.init(result.state)` itself, only after seeing
+`result.ok === true`. A failed import was never applied to `Engine` in
+the first place, so there's nothing to undo.
 
 Kept as its own file rather than folded into `ui.js`, for the same
 reason `drawInteraction.js` was split out at v0.7.1 — `ui.js` stays
@@ -495,22 +537,35 @@ custom starting positions (not currently planned) would add a new
 `startingPosition`/`game` section to the format, rather than promoting
 this field into something it was never meant to describe.
 
-### Import replays through the real engine, not a parallel validator
+### Import replays through the real rules, not a parallel validator
 
 `importGame()` does not re-implement legality checking. It replays every
-move in the record through `Engine.apply()` — the identical function
-ordinary play uses — so a Game Record's legality is checked by exactly
-one code path, the same one that already rejects an illegal move drawn
-by a human player. There is deliberately no second, independent notion
-of "is this move sequence legal" anywhere in the codebase.
+move in the record by calling `validateMove()` and `applyMove()`
+directly — the exact same pure functions `Engine.apply()` itself calls
+internally — so a Game Record's legality is checked by exactly one
+implementation of the rules, the same one that already rejects an
+illegal move drawn by a human player. There is deliberately no second,
+independent notion of "is this move sequence legal" anywhere in the
+codebase.
 
-Before replaying, `importGame()` snapshots whatever the `Engine`
-singleton currently holds. If any move in the record turns out illegal,
-that snapshot is restored before returning failure — so a bad or
-hand-edited paste can never corrupt or silently replace a game already
-in progress. This mirrors, at the scale of a whole game, the same
-unchanged-state-on-failure guarantee `Engine.apply()` already provides
-for a single move.
+`importGame()` never touches the `Engine` singleton (v0.8.6 — see
+"Architecture" above). It builds a local state object and returns it,
+on success or failure, with zero effect on whatever game happens to be
+live in the browser. This means it's safe to call repeatedly with
+different records — e.g. a database validating many stored games, or a
+bot exploring several hypothetical continuations — with no risk of one
+call's replay leaking into another's, and no risk of a legal-but-
+unwanted import silently overwriting a game in progress. Whether a
+successful import becomes the live game is an explicit, separate
+decision made by the caller (`gameRecordUI.js`), not something
+`importGame()` decides on its own.
+
+An earlier version of this function called `Engine.init()`/
+`Engine.apply()` directly against the shared singleton, snapshotting
+and restoring it if a move turned out illegal. That protected the
+failure case but not the success case — a legal import would still
+silently become the live game. Operating on local state throughout
+removes the asymmetry entirely, rather than patching around it.
 
 ### Rendering an imported game has no original geometry to restore
 

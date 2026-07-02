@@ -1,5 +1,5 @@
 /* ================================================================
-   gameRecordUI.js — Sprouts v0.8.5
+   gameRecordUI.js — Sprouts v0.8.6
 
    Responsibility
    ──────────────
@@ -13,6 +13,16 @@
    the same reasoning that split drawInteraction.js out of ui.js at
    v0.7.1 — ui.js stays focused on orchestrating the active game;
    this file owns one small, separable concern and nothing else.
+
+   v0.8.6 — this file now owns the live-Engine-mutation step
+   ────────────────────────────────────────────────────────────
+   engine/gameRecord.js's importGame() no longer touches the Engine
+   singleton at all — it returns a plain replayed state object and
+   nothing more. This file is the one place that decides whether a
+   successfully-imported record actually becomes the live game: only
+   after seeing result.ok === true does it call Engine.init(result.state)
+   itself. A failed import was never applied to Engine in the first
+   place, so there's nothing to undo.
 
    Depends on: engine/engine.js, engine/gameRecord.js, ui.js
    ================================================================ */
@@ -71,7 +81,11 @@ export function init() {
       return;
     }
 
+    // importGame() never touches Engine itself (v0.8.6) — this is
+    // the explicit, caller-owned step that makes the successfully
+    // replayed record the live game.
     importStatus.textContent = '';
+    Engine.init(result.state);
     loadImportedGame(result.state);
   });
 }

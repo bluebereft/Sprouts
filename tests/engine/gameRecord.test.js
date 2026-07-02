@@ -1,19 +1,20 @@
 /* ================================================================
-   tests/engine/gameRecord.test.js — Sprouts v0.8.5
+   tests/engine/gameRecord.test.js — Sprouts v0.8.6
 
    Tests for js/engine/gameRecord.js — pure Game Record export,
-   import, and round-trip replay through the real engine.
+   import, and round-trip replay.
 
-   Engine is a module-level singleton — see tests/engine/engine.test.js
-   for why every test that touches import/export must not assume a
-   clean starting state, and why importGame()'s snapshot/restore
-   behaviour on failure is worth testing explicitly here, not just
-   trusted.
+   v0.8.6: gameRecord.js no longer touches the Engine singleton at
+   all — it operates purely on local state, via reducer.js's
+   applyMove() and rules.js's validateMove() directly. These tests
+   build their own fixtures the same way (direct applyMove() calls),
+   never importing engine.js, so this file has no shared-singleton
+   ordering concerns the way tests/engine/engine.test.js does.
    ================================================================ */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import Engine from '../../js/engine/engine.js';
+import { applyMove } from '../../js/engine/reducer.js';
 import { createMove } from '../../js/engine/move.js';
 import {
   FORMAT_VERSION,
@@ -37,12 +38,14 @@ function freshState() {
 }
 
 /** Plays two legal moves against a fresh 3-dot game and returns the
- *  resulting engine state, for use as test fixtures. */
+ *  resulting state, for use as test fixtures. Built via applyMove()
+ *  directly — gameRecord.js is the thing under test, not the thing
+ *  used to construct fixtures for testing itself. */
 function playTwoMoves() {
-  Engine.init(freshState());
-  Engine.apply(createMove(0, 1));
-  Engine.apply(createMove(2, 2)); // self-loop, dot 2 still has 3 lives
-  return Engine.getState();
+  let state = freshState();
+  state = applyMove(state, createMove(0, 1));
+  state = applyMove(state, createMove(2, 2)); // self-loop, dot 2 has 3 lives
+  return state;
 }
 
 // ── exportGame ─────────────────────────────────────────────────
@@ -99,6 +102,19 @@ test('round trip: reproduces identical dots, edges, and currentPlayer', () => {
   assert.equal(result.state.currentPlayer, original.currentPlayer);
 });
 
+test('round trip: reproduces edges with matching originatingMoveIndex', () => {
+  // v0.8.6 — edge provenance must survive a full export/import cycle,
+  // since renderer.js now depends on it entirely (no positional
+  // fallback exists any more).
+  const original = playTwoMoves();
+  const result = importGame(exportGame(original));
+
+  const originalIndices = original.edges.map(e => e.originatingMoveIndex);
+  const importedIndices = result.state.edges.map(e => e.originatingMoveIndex);
+  assert.deepEqual(importedIndices, originalIndices);
+  assert.deepEqual(importedIndices, [0, 0, 1, 1]); // 2 edges per move, in order
+});
+
 test('round trip: via JSON string end to end', () => {
   const original = playTwoMoves();
   const json = exportGameToJSON(original);
@@ -109,18 +125,17 @@ test('round trip: via JSON string end to end', () => {
 });
 
 test('round trip: works for a game with startingPlayer 1', () => {
-  Engine.init({
+  let state = {
     dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
     edges: [], nextDotId: 2, moves: [],
     currentPlayer: 1, initialDotCount: 2, startingPlayer: 1,
-  });
-  Engine.apply(createMove(0, 1));
-  const original = Engine.getState();
+  };
+  state = applyMove(state, createMove(0, 1));
 
-  const result = importGame(exportGame(original));
+  const result = importGame(exportGame(state));
   assert.equal(result.ok, true);
   assert.equal(result.state.startingPlayer, 1);
-  assert.equal(result.state.currentPlayer, original.currentPlayer);
+  assert.equal(result.state.currentPlayer, state.currentPlayer);
 });
 
 // ── importGame: malformed record shape ──────────────────────────
@@ -182,34 +197,45 @@ test('importGame: rejects a record whose move sequence is illegal', () => {
   assert.ok(Array.isArray(result.violations));
 });
 
-test('importGame: a failed import restores whatever game was previously active', () => {
-  // Start a real, distinguishable game.
-  Engine.init(freshState());
-  Engine.apply(createMove(0, 1));
-  const before = Engine.getState();
+// ── importGame: no shared state, v0.8.6 ──────────────────────────
 
-  // Attempt an import that will fail partway through.
+test('importGame: successive calls are fully independent — no state leaks between them', () => {
+  // Before v0.8.6 this would have gone through the shared Engine
+  // singleton; a bad interaction between two calls would have shown
+  // up as one call's replay bleeding into the other's result. Since
+  // importGame() now only ever builds a local state object and
+  // returns it, two calls with different records must produce
+  // results that reflect only their own record, regardless of order
+  // or what ran immediately before.
+  const recordA = exportGame(playTwoMoves()); // 2 moves
+
+  let singleMoveState = freshState();
+  singleMoveState = applyMove(singleMoveState, createMove(0, 1));
+  const recordB = exportGame(singleMoveState); // 1 move
+
+  const resultA = importGame(recordA);
+  const resultB = importGame(recordB);
+
+  assert.equal(resultA.state.moves.length, 2);
+  assert.equal(resultB.state.moves.length, 1);
+});
+
+test('importGame: a failed import does not affect a subsequent successful import', () => {
   const badRecord = {
     formatVersion: FORMAT_VERSION,
     initialDotCount: 1,
     startingPlayer: 0,
     moves: [
       { startDotId: 0, endDotId: 0, regionId: 0 },
-      { startDotId: 0, endDotId: 0, regionId: 0 }, // illegal — insufficient lives
+      { startDotId: 0, endDotId: 0, regionId: 0 }, // illegal
     ],
   };
-  const result = importGame(badRecord);
+  const goodRecord = exportGame(playTwoMoves());
 
-  assert.equal(result.ok, false);
-  // The engine must be back to exactly what it was before the
-  // failed import attempt — same moves, same dots, not the
-  // partially-replayed bad record.
-  assert.deepEqual(Engine.getState(), before);
-});
+  const failureResult = importGame(badRecord);
+  const successResult = importGame(goodRecord);
 
-test('importGame: malformed-shape rejection never touches Engine at all', () => {
-  Engine.init(freshState());
-  const before = Engine.getState();
-  importGame({ formatVersion: 999, initialDotCount: 2, startingPlayer: 0, moves: [] });
-  assert.strictEqual(Engine.getState(), before); // exact same reference
+  assert.equal(failureResult.ok, false);
+  assert.equal(successResult.ok, true);
+  assert.equal(successResult.state.moves.length, 2);
 });

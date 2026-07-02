@@ -281,8 +281,77 @@ Build a browser-based implementation of Sprouts that evolves into a research pla
   cache in the persisted format, only if a future performance need
   justifies it (not currently justified — engine state is still simple)
 
+### v0.8.6 — Architecture Review Follow-up ✅
+- Senior-architect-level review of the full v0.1–v0.8.5 codebase, scoped
+  specifically to what becomes expensive after canonicalisation, replay,
+  databases, and AI (style/naming/comments explicitly excluded)
+- **Finding 1 — edge provenance.** Edges previously carried no reference
+  to the move that created them; the only link was positional arithmetic
+  (`floor(edgeIndex / 2)`) duplicated across `renderer.js` and implicitly
+  assumed by `boardView.js`. Fixed by having the reducer stamp
+  `originatingMoveIndex` directly on every edge it creates
+  (`state.moves.length` at creation time). Considered and rejected a
+  globally unique `moveId`: a move is an event within one playthrough,
+  not a mathematical entity with independent identity, so a *local*,
+  per-game index is the correct scope, not a global counter.
+  `renderer.js`'s `renderEdges()` now groups edges by
+  `originatingMoveIndex` directly rather than deriving grouping from
+  array position
+- **Finding 2 — gameRecord.js decoupled from the Engine singleton.**
+  `importGame()` previously called `Engine.init()`/`Engine.apply()`
+  directly, snapshotting and restoring the singleton on failure — but
+  had no equivalent protection on success, meaning a legal-but-unwanted
+  import would silently overwrite whatever game was live. `gameRecord.js`
+  no longer imports `engine.js` at all; `importGame()` now calls
+  `validateMove()`/`applyMove()` directly, builds a local state object,
+  and never touches any shared singleton — so calling it has zero effect
+  on a live game unless the caller explicitly acts on success.
+  `gameRecordUI.js` now owns that explicit step (`Engine.init(result.state)`
+  only after `result.ok === true`). This also makes `importGame()` safe
+  to call repeatedly with different records with no risk of one call's
+  replay leaking into another's — directly relevant to a future database
+  validating many stored records, or a bot exploring several hypothetical
+  continuations
+- **Finding 4 — direct reducer tests.** `applyMove()` was previously only
+  exercised indirectly through `Engine.apply()`. New
+  `tests/engine/reducer.test.js` (15 tests) tests it in isolation: lives
+  arithmetic (including the published "-1 total lives per move"
+  invariant), sprout creation, edge creation and the new
+  `originatingMoveIndex` field, move history, turn toggling,
+  immutability of the input state, and preservation of
+  `initialDotCount`/`startingPlayer` across a move
+- **Finding 3 — deliberately not acted on**, kept as a documented note:
+  v0.9 is scoped as "replace the `regions.js` stub," which undersells the
+  work — making `regionId` meaningful requires the reducer itself to gain
+  real region-splitting logic, not just a swapped-out lookup function.
+  The reducer's current flat, easy-to-audit character should not be
+  assumed to survive unchanged into v0.9
+- `tests/engine/gameRecord.test.js` rewritten to match the new
+  Engine-independent contract: fixtures now built via direct `applyMove()`
+  calls rather than through `Engine`; the old "failed import restores
+  Engine" tests replaced with tests proving successive `importGame()`
+  calls are fully independent of each other
+- Findings reviewed and explicitly NOT acted on, with reasoning recorded:
+  `BoardView`/`SelectionState` singletons are correct as-is (genuinely
+  single-instance browser concepts, unlike `Engine`); `Move`'s
+  `{startDotId, endDotId, regionId}` shape is sufficient for canonical
+  identity without a new field; the dot-ID scheme (simple incrementing
+  counter) is fine as an internal identifier, since canonicalisation's
+  job is precisely to map it to an ID-independent form; the "exactly 1
+  new dot + 2 new edges per move" assumption is safe long-term, being
+  fundamental to Sprouts itself; `validateMove`'s violations-array design
+  already correctly anticipates future multi-violation cases
+- 61 tests total, all passing (46 existing, 2 replaced, 17 new)
+
 ### v0.9 — Topological Model
 - Replace `engine/regions.js` stub with real region tracking
+- **Note carried from the v0.8.6 architecture review:** this is not
+  contained to `regions.js` alone. Making `regionId` meaningful requires
+  `reducer.js`'s `applyMove()` itself to gain real region-splitting logic
+  — the reducer's current flat, easy-to-audit character should not be
+  assumed to survive unchanged. Decide deliberately at this point whether
+  region-splitting belongs directly inside `applyMove()` or as a separate
+  pass it calls out to, rather than letting conditionals accrete in place
 - Region splitting: how a move divides one region into two
 - Boundary structure per region (supports multiple boundaries per region,
   e.g. a free-floating dot inside a larger region)

@@ -1,5 +1,5 @@
 /* ================================================================
-   gameRecord.js — Sprouts Engine Game Records (v0.8.5)
+   gameRecord.js — Sprouts Engine Game Records (v0.8.6)
 
    Responsibility
    ──────────────
@@ -11,26 +11,51 @@
    only the player's choices: how many dots the game started with,
    who moved first, and the ordered sequence of moves. Everything
    else — dots, edges, nextDotId, currentPlayer at any point in the
-   game — is derived by replaying the moves through the real engine,
-   never stored.
+   game — is derived by replaying the moves, never stored.
 
    This means exportGame()/importGame() never need to change shape
    when the engine's internal state representation changes (e.g. when
    v0.9 adds region/boundary tracking) — the Game Record only ever
    describes the game, never the engine's current internals.
 
-   importGame() replays every move through Engine.apply() — the same
-   function used for ordinary play — so a Game Record's legality is
-   checked by the exact same code path as a human player's move,
-   never a second, independent implementation of the rules.
+   v0.8.6 — no dependency on the live Engine singleton
+   ──────────────────────────────────────────────────────
+   Earlier, importGame() called Engine.init()/Engine.apply() directly
+   against the shared Engine singleton, snapshotting and restoring it
+   on failure so a bad import wouldn't corrupt a game in progress. But
+   there was no equivalent protection on SUCCESS — a legal-but-unwanted
+   import would silently become the live game, with no way to just
+   ask "is this record valid?" or "what would this produce?" without
+   it taking over the actual session.
+
+   This file no longer imports engine.js at all. importGame() calls
+   engine/rules.js's validateMove() and engine/reducer.js's applyMove()
+   directly — the exact same pure functions Engine.apply() itself
+   calls internally — building up a local state object and returning
+   it. It never touches any shared singleton, so there is nothing to
+   snapshot or restore, and calling it never has any effect on a live
+   game unless the CALLER explicitly decides to act on the result
+   (see gameRecordUI.js, which calls Engine.init(result.state) itself,
+   only after seeing result.ok === true).
+
+   This also makes importGame() safe to call many times in a row with
+   different records — e.g. a database validating a batch of stored
+   games, or a bot exploring several hypothetical continuations — with
+   zero risk of one call's replay leaking into another's.
+
+   Game Record legality is still checked by the exact same rules a
+   human player's move is checked against (validateMove), never a
+   second, independent implementation — that guarantee didn't depend
+   on going through the Engine singleton and is preserved here.
 
    No DOM. No browser APIs beyond JSON, which is standard JS, not a
    browser-specific API — this file runs identically under Node.
 
-   Depends on: engine.js
+   Depends on: reducer.js, rules.js
    ================================================================ */
 
-import Engine from './engine.js';
+import { applyMove } from './reducer.js';
+import { validateMove } from './rules.js';
 
 /** Current Game Record format version. Bump when the shape changes. */
 export const FORMAT_VERSION = 1;
@@ -61,8 +86,28 @@ function buildInitialDots(count) {
 }
 
 /**
+ * Builds a fresh engine state object from a (already shape-validated)
+ * Game Record's starting parameters. Matches exactly what ui.js's
+ * startGame() constructs for an ordinary new game.
+ *
+ * @param {{ initialDotCount: number, startingPlayer: number }} record
+ * @returns {object} fresh engine state
+ */
+function buildInitialState(record) {
+  return {
+    dots:            buildInitialDots(record.initialDotCount),
+    edges:           [],
+    nextDotId:       record.initialDotCount,
+    moves:           [],
+    currentPlayer:   record.startingPlayer,
+    initialDotCount: record.initialDotCount,
+    startingPlayer:  record.startingPlayer,
+  };
+}
+
+/**
  * Validates the shape of a candidate Game Record before attempting
- * to replay it. Checked before Engine is touched at all.
+ * to replay it.
  *
  * @param {*} record
  * @returns {{ ok: true } | { ok: false, error: string, message?: string }}
@@ -97,11 +142,11 @@ function validateRecordShape(record) {
  * Converts engine state into a Game Record — a plain object
  * describing the game's starting parameters and move sequence.
  * Deliberately does NOT include dots, edges, nextDotId, or
- * currentPlayer: all of that is derivable by replaying moves
- * through the engine, and persisting it would tie saved files to
- * one moment in the engine's internal representation.
+ * currentPlayer: all of that is derivable by replaying moves, and
+ * persisting it would tie saved files to one moment in the engine's
+ * internal representation.
  *
- * @param {object} state — engine state (from Engine.getState())
+ * @param {object} state — engine state (e.g. from Engine.getState())
  * @returns {{ formatVersion: number, initialDotCount: number,
  *             startingPlayer: number,
  *             moves: Array<{startDotId, endDotId, regionId}> }}
@@ -132,17 +177,16 @@ export function exportGameToJSON(state) {
 
 /**
  * Reconstructs a game from a Game Record by replaying its moves
- * through the real engine — Engine.apply(), the exact same function
- * ordinary play uses. There is no separate, independent legality
- * check for imported games; a Game Record is only as legal as the
- * moves it contains, verified the same way a human player's moves
- * always are.
+ * through validateMove() + applyMove() — the exact same pure
+ * functions Engine.apply() itself calls. There is no separate,
+ * independent legality check for imported games; a Game Record is
+ * only as legal as the moves it contains, verified the same way a
+ * human player's moves always are.
  *
- * Snapshots whatever the Engine singleton currently holds before
- * starting the replay, and restores it if any move in the record
- * turns out to be illegal — so a failed import never leaves the
- * previously active game (if any) corrupted by a partial replay.
- * On success, the newly replayed state is left live in Engine.
+ * Operates entirely on a local state object. Never touches any
+ * shared singleton, so this function has no effect on a live game
+ * unless the caller explicitly acts on a successful result (e.g.
+ * gameRecordUI.js calling Engine.init(result.state)).
  *
  * @param {*} record — candidate Game Record, e.g. from JSON.parse
  * @returns {{ ok: true, state: object } |
@@ -153,38 +197,30 @@ export function importGame(record) {
   const shapeCheck = validateRecordShape(record);
   if (!shapeCheck.ok) return shapeCheck;
 
-  const previousState = Engine.getState(); // may be null on first-ever load
-
-  Engine.init({
-    dots:            buildInitialDots(record.initialDotCount),
-    edges:           [],
-    nextDotId:       record.initialDotCount,
-    moves:           [],
-    currentPlayer:   record.startingPlayer,
-    initialDotCount: record.initialDotCount,
-    startingPlayer:  record.startingPlayer,
-  });
+  let state = buildInitialState(record);
 
   for (let i = 0; i < record.moves.length; i++) {
     const m = record.moves[i];
-    const result = Engine.apply({
+    const move = {
       startDotId: m.startDotId,
       endDotId:   m.endDotId,
       regionId:   m.regionId ?? 0,
-    });
+    };
 
-    if (!result.ok) {
-      if (previousState) Engine.init(previousState);
+    const validation = validateMove(state, move);
+    if (!validation.ok) {
       return {
         ok: false,
         error: ImportError.ILLEGAL_MOVE,
         moveIndex: i,
-        violations: result.violations,
+        violations: validation.violations,
       };
     }
+
+    state = applyMove(state, move);
   }
 
-  return { ok: true, state: Engine.getState() };
+  return { ok: true, state };
 }
 
 /**

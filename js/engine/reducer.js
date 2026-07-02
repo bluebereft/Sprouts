@@ -1,5 +1,5 @@
  /* ================================================================
-   reducer.js — Sprouts Engine Core (v0.8)
+   reducer.js — Sprouts Engine Core (v0.8.6)
 
    Responsibility
    ──────────────
@@ -11,6 +11,22 @@
    legality checking itself and never will; keeping it a pure,
    unconditional state transition is what makes it easy to reason
    about, test, and reuse for replay.
+
+   v0.8.6 — edge provenance
+   ────────────────────────
+   Each edge now carries originatingMoveIndex: the position of the
+   move that created it within THIS game's own move history (i.e.
+   state.moves.length at the moment the edge is created — the same
+   local, per-playthrough indexing already used everywhere else a
+   move is referenced, e.g. Game Records, BoardView's edgePaths map).
+
+   This is explicit provenance, not a global move identifier — a
+   move is an event within one playthrough, not a mathematical
+   entity with its own identity, so there is no moveId counter here.
+   Before this, the only way to know which move produced an edge was
+   positional arithmetic (floor(edgeIndex / 2)) duplicated across
+   renderer.js and implicitly assumed by boardView.js. That's now
+   explicit data on the edge itself.
 
    IMPORTANT RULES:
    - NO DOM access
@@ -28,23 +44,25 @@
 /**
  * Applies a move to the current game state and returns a new state.
  *
- * NOTE:
- * This is a simplified Sprouts model aligned with your current system.
- * (No planar embedding yet — v0.4 keeps engine lightweight.)
- *
  * @param {Object} state               - current engine state
  * @param {Array}  state.dots          - all dots { id, lives }
- * @param {Array}  state.edges         - all edges { a, b }
+ * @param {Array}  state.edges         - all edges { a, b, originatingMoveIndex }
  * @param {number} state.nextDotId     - next dot id counter
  * @param {Array}  state.moves         - move history
  * @param {number} state.currentPlayer - 0 or 1
- * @param {Object} move                - { startDotId, endDotId }
+ * @param {Object} move                - { startDotId, endDotId, regionId }
  *
  * @returns {Object} new game state
  */
 export function applyMove(state, move) {
   const { startDotId, endDotId } = move;
   const isLoop = startDotId === endDotId;
+
+  // The index this move will occupy in state.moves once appended —
+  // computed before the append, since it's needed to stamp the
+  // edges below. This is a LOCAL index, scoped to this game's own
+  // move history, not a globally unique identifier.
+  const moveIndex = state.moves.length;
 
   // 1. Decrement lives of endpoint dots.
   //    A self-loop touches the same dot twice, consuming 2 lives.
@@ -71,16 +89,19 @@ export function applyMove(state, move) {
     lives: 1,
   };
 
-  // 3. Create new edges connecting endpoints → new dot
+  // 3. Create new edges connecting endpoints → new dot.
+  //    originatingMoveIndex is explicit provenance — see file header.
   const newEdges = [
     ...state.edges,
     {
       a: startDotId,
-      b: newDot.id
+      b: newDot.id,
+      originatingMoveIndex: moveIndex,
     },
     {
       a: endDotId,
-      b: newDot.id
+      b: newDot.id,
+      originatingMoveIndex: moveIndex,
     }
   ];
 

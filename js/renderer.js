@@ -1,5 +1,5 @@
 /* ================================================================
-   renderer.js — Sprouts v0.8.5
+   renderer.js — Sprouts v0.8.6
 
    Responsibility
    ──────────────
@@ -247,19 +247,24 @@ const Renderer = (() => {
   }
 
   /**
-   * Redraws all edges from current engine state, reading each edge's
-   * path from BoardView. Falls back to a straight line between the
-   * two dot positions if no path was recorded — this is the normal
-   * case for an imported Game Record, which stores no drawn geometry
-   * at all (see engine/gameRecord.js), not just a defensive fallback.
+   * Redraws all edges from current engine state, reading each move's
+   * path from BoardView. Falls back to straight lines between dot
+   * positions if no path was recorded — the normal case for an
+   * imported Game Record, which stores no drawn geometry at all
+   * (see engine/gameRecord.js), not just a defensive fallback.
    *
-   * Derives player for each edge from move index via playerForMove(),
+   * Groups edges by originatingMoveIndex (explicit provenance the
+   * reducer stamps on every edge, v0.8.6) rather than deriving the
+   * grouping from array position — floor(edgeIndex / 2) assumed a
+   * fixed two-edges-per-move, append-only ordering that was never
+   * enforced by anything and would have broken under any future
+   * non-linear move history.
+   *
+   * Derives player for each move from move index via playerForMove(),
    * reading engineState.startingPlayer rather than assuming the
    * default (player 0) — a freshly-started game always has
    * startingPlayer 0, but an imported Game Record can specify
    * startingPlayer 1, and edges must be coloured correctly either way.
-   * Each move produces exactly 2 edges, so:
-   *   moveIndex = Math.floor(edgeIndex / 2)
    *
    * @param {object} engineState
    */
@@ -268,32 +273,40 @@ const Renderer = (() => {
     boardEl.querySelectorAll('.edge:not(.edge--draft)').forEach(el => el.remove());
     if (!engineState || !Array.isArray(engineState.edges)) return;
 
-    engineState.edges.forEach((edge, edgeIndex) => {
-      const moveIndex = Math.floor(edgeIndex / 2);
-      const player    = playerForMove(moveIndex, engineState.startingPlayer ?? 0);
-      const path      = BoardView.getEdgePath(moveIndex);
+    // Group edges by the move that created them. A move currently
+    // always produces exactly two edges, but grouping by explicit
+    // provenance rather than assuming that count keeps this correct
+    // even if that ever changes.
+    const edgesByMove = new Map();
+    engineState.edges.forEach(edge => {
+      const moveIndex = edge.originatingMoveIndex;
+      if (!edgesByMove.has(moveIndex)) edgesByMove.set(moveIndex, []);
+      edgesByMove.get(moveIndex).push(edge);
+    });
+
+    edgesByMove.forEach((edgesForMove, moveIndex) => {
+      const player = playerForMove(moveIndex, engineState.startingPlayer ?? 0);
+      const path   = BoardView.getEdgePath(moveIndex);
 
       if (path) {
-        // The same drawn path is shared by both of a move's two edges
-        // (start→sprout and sprout→end), since the path is the full
-        // curve from start to end with the sprout sitting on it.
-        // Each edge half of the path is rendered once per moveIndex;
-        // only draw it on the first edge of the pair to avoid
-        // drawing the same curve twice.
-        if (edgeIndex % 2 === 0) {
-          drawPath(path, player);
-        }
+        // The single drawn curve is shared by both of this move's
+        // edges (start→sprout and sprout→end) — draw it once.
+        drawPath(path, player);
         return;
       }
 
-      // Fallback: no recorded path (shouldn't happen post-v0.7).
-      const posA = BoardView.getDotPosition(edge.a);
-      const posB = BoardView.getDotPosition(edge.b);
-      if (!posA || !posB) {
-        console.warn(`Renderer.renderEdges: missing position for edge`, edge);
-        return;
-      }
-      drawPath([posA, posB], player);
+      // Fallback: no recorded path. Draw a straight line for each of
+      // this move's edges individually, since there's no single
+      // curve to share between them.
+      edgesForMove.forEach(edge => {
+        const posA = BoardView.getDotPosition(edge.a);
+        const posB = BoardView.getDotPosition(edge.b);
+        if (!posA || !posB) {
+          console.warn(`Renderer.renderEdges: missing position for edge`, edge);
+          return;
+        }
+        drawPath([posA, posB], player);
+      });
     });
   }
 
