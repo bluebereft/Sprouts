@@ -402,21 +402,53 @@ different object.
   is intentional, the same safe isolation `regionId` itself had for two
   full versions before v0.9 gave it anything to compute
 
-#### v0.9.1 — Pure region query functions (not yet started)
-- `getBoundaryForDot`, `getRegionForDot` (real implementation),
-  `areDotsInSameRegion`, `areDotsOnSameBoundary`, `getBoundariesForRegion`
-- A `checkInvariants(state)` structural checker — `{ ok, violations }`
-  shape matching `validateMove`'s — covering: every dot in exactly one
-  boundary, every boundary in exactly one region, boundary vertex
-  sequences correspond to real edges, and Euler's formula
-- Tests built against HAND-CONSTRUCTED multi-region/multi-boundary
-  fixtures — deliberately never produced by a splitting algorithm, since
-  none exists yet, so these tests remain a trustworthy oracle
-  independent of whatever v0.9.2 later produces
-- Open question to resolve via the literature pass before implementing:
+#### v0.9.1 — Pure region query functions ✅
+- `getBoundaryForDot`, `getRegionForDot` (real implementation replacing
+  the v0.7/v0.9 stub), `areDotsInSameRegion`, `areDotsOnSameBoundary`,
+  `getBoundariesForRegion` — all pure containment lookups over
+  `state.regions`/`state.boundaries`
+- `checkInvariants(state)` — `{ ok, violations }` shape matching
+  `validateMove`'s, with a new `TopologyError` enum. Checks: every dot
+  in exactly one boundary, every boundary in exactly one region, every
+  boundary's cyclic vertex sequence corresponds to real edges, and
+  Euler's formula (`V − E + F = 1 + C`, via union-find over dots/edges
+  for the connected-component count)
+- **Scope correction found while designing tests, worth recording:**
+  two hand-built "multi-region" fixtures turned out to be invalid on
+  inspection. Two isolated dots as separate regions is wrong — isolated
+  points enclose nothing, so they can't be separate faces (this is
+  exactly what `buildInitialTopology` already models correctly: one
+  region, multiple trivial boundaries). A triangle-plus-floating-dot
+  fixture failed Euler's formula by hand — a triangle alone divides the
+  plane into inside and outside (`F=2`, not the `F=1` first assumed),
+  and correctly placing a fourth dot into one of those two faces
+  requires knowing which side of an edge each boundary walks — the
+  same "does every edge border exactly two boundary-sides, in opposite
+  directions" question already flagged in design.md as unverified.
+  Rather than encode that unverified guess into a test, `checkInvariants`'
+  Euler's-formula coverage is limited to states already known correct
+  (the seeded starting topology, several dot counts) for this version.
+  Real multi-region Euler coverage is deferred to v0.9.2, checked
+  against a state the splitting algorithm actually produces and
+  cross-validated against the literature once, rather than invented
+  by hand now
+- The five lookup functions don't have this problem — pure containment
+  queries, correct for any structurally well-formed input regardless of
+  whether it represents a valid embedding — so they're tested against
+  simple hand-built fixtures without needing that convention resolved
+- `checkInvariants`'s non-Euler checks (partition counts, boundary-edge
+  correspondence) tested via deliberately-broken variants of the known-
+  good 2-dot starting state — confirms the checker actually detects bad
+  structure, not just that it accepts good structure
+- `ui.js` needed zero changes — `getRegionForDot`'s call sites are
+  unchanged in shape; only what happens behind them changed
+- 88 tests total, all passing (69 existing + 19 new)
+- Still not observable in the browser, for the same reason as v0.9 —
+  only one region exists until v0.9.2
+- Open question still unresolved, carried to the literature pass:
   where (if anywhere) do "lands" (independent connected components)
   belong — possibly a canonicalisation-layer concept rather than an
-  engine one; not yet certain
+  engine one
 
 #### v0.9.2 — Reducer learns to mutate the topological model (not yet started)
 - Expected to be the hardest algorithm in the project so far

@@ -1,5 +1,5 @@
 # Sprouts Lab Design
-Last updated: v0.9 (topological data model — regions/boundaries seeded, no mutation logic yet)
+Last updated: v0.9.1 (pure region query functions, checkInvariants)
 
 ## Philosophy
 
@@ -256,26 +256,30 @@ the mathematical game state — they live in boardView.
 **`move.js`** — `createMove(startDotId, endDotId, regionId = 0)` factory.
 `regionId` identifies which region of the position the curve was drawn
 through (see "Canonical Position Representation" below). Defaults to 0
-since `getRegionForDot` still always returns 0 — real region tracking
-exists as data (v0.9) but not yet as query logic (v0.9.1) or mutation
-(v0.9.2).
+because every position currently has exactly one region — `regionId`
+now reflects a genuine computation (v0.9.1's real `getRegionForDot`),
+just one whose answer hasn't had a reason to differ from 0 yet, since
+mutation/splitting logic doesn't exist until v0.9.2.
 
-**`regions.js`** — pure combinatorial region model. As of v0.9, this
-holds real DATA (`regions`, `boundaries`, `nextRegionId`,
-`nextBoundaryId` on engine state — see shape above) but no mutation
-logic yet — the topological model is real and correctly seeded, but
-nothing splits it. `buildInitialTopology(dotCount)` seeds the starting
-position: one region containing one boundary PER DOT (not one shared
-boundary), since a boundary is a cyclic walk along real edges and
-there are none yet — see "Topological Model" below for why this
-matters. `getRegionForDot()`'s body is still the v0.7 stub (always
-returns 0) and remains behaviourally correct throughout v0.9, since
-only region 0 exists until real splitting logic exists. Reserved,
-not-yet-implemented query functions (`getBoundaryForDot`,
-`areDotsInSameRegion`, `areDotsOnSameBoundary`, a `checkInvariants`
-structural checker) and the splitting algorithm itself are tracked
-separately in ROADMAP.md as v0.9.1/v0.9.2/v0.9.3 — deliberately not
-bundled into one version; see "Topological Model" below for why.
+**`regions.js`** — pure combinatorial region model. As of v0.9.1, this
+holds real data (`regions`, `boundaries`, `nextRegionId`,
+`nextBoundaryId` on engine state) and real query logic, but no
+mutation logic yet — the topological model is real, correctly seeded,
+and fully queryable, but nothing splits or merges it.
+`buildInitialTopology(dotCount)` (v0.9) seeds the starting position:
+one region containing one boundary PER DOT (not one shared boundary),
+since a boundary is a cyclic walk along real edges and there are none
+yet — see "Topological Model" below for why this matters.
+`getBoundaryForDot`, `getRegionForDot` (real implementation, replacing
+the v0.7/v0.9 stub), `areDotsInSameRegion`, `areDotsOnSameBoundary`,
+`getBoundariesForRegion` (v0.9.1) are pure containment lookups.
+`checkInvariants(state)` (v0.9.1) — `{ ok, violations }` shape
+matching `validateMove`'s, with a `TopologyError` enum — checks
+structural well-formedness including Euler's formula. Its Euler
+coverage is currently tested only against states already known
+correct; see "Topological Model" below for why. The splitting
+algorithm itself is tracked separately in ROADMAP.md as v0.9.2/v0.9.3
+— deliberately not bundled into this version.
 
 **`gameRecord.js`** — pure export/import of Game Records (v0.8.5,
 decoupled from `Engine` at v0.8.6). See "Persistence" below for the
@@ -663,6 +667,46 @@ is the number of connected components. At game start, `V = N` (dots),
 `N` boundaries to exist, not one — seeding one shared boundary would
 make this invariant fail on the very first position anyone checks it
 against.
+
+### A fixture-construction failure that confirmed the open question (v0.9.1)
+
+While designing v0.9.1's tests, two hand-built "multi-region" fixtures
+turned out, on inspection, to be invalid planar structures — not just
+wrong test data, but genuinely impossible configurations.
+
+The first: two isolated dots modelled as two separate regions. Wrong —
+isolated points enclose nothing, so they can't be separate faces at
+all. This is exactly what `buildInitialTopology` already gets right:
+one region, multiple trivial boundaries, never multiple regions for
+disconnected points with no enclosing structure.
+
+The second, more instructive: a triangle (one boundary, three dots)
+plus a fourth, floating dot placed inside the same declared region.
+Working through Euler's formula by hand for this fixture failed
+immediately — a triangle alone divides the plane into an inside face
+and an outside face, `F = 2`, not the `F = 1` first assumed. Correctly
+placing the fourth dot into whichever of those two faces it actually
+sits in — and correctly modelling the triangle's boundary once as the
+*inside* face's boundary and once, walked in the opposite direction,
+as part of the *outside* face's boundary — requires resolving exactly
+the question already flagged above as unverified: whether every edge
+borders two boundary-sides, traversed in opposite directions by each
+side's face.
+
+Rather than encode an unverified guess about that convention into a
+trusted test, v0.9.1's `checkInvariants` Euler's-formula coverage was
+scoped down to states already known correct (the seeded starting
+topology, several dot counts) instead of a hand-built multi-region
+example. Real multi-region Euler coverage is deferred to v0.9.2, where
+it can be checked against a state the splitting algorithm actually
+produces and cross-validated against the literature once, rather than
+invented by hand under uncertainty now. The five pure lookup functions
+(`getBoundaryForDot`, `getRegionForDot`, `areDotsInSameRegion`,
+`areDotsOnSameBoundary`, `getBoundariesForRegion`) don't have this
+problem — they're containment queries, correct for any structurally
+well-formed input regardless of whether it represents a valid
+embedding, so they were tested against simple hand-built fixtures
+without needing the convention resolved first.
 
 ### Split vs. merge — two operations, not one algorithm
 
