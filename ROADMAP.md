@@ -450,25 +450,45 @@ different object.
   belong — possibly a canonicalisation-layer concept rather than an
   engine one
 
-#### v0.9.2 — Reducer learns to mutate the topological model (not yet started)
+#### v0.9.2 — Reducer learns to mutate the topological model (spec complete, implementation not started)
 - Expected to be the hardest algorithm in the project so far
-- Two topologically distinct operations, NOT one algorithm with a
-  branch — per Čížek & Balko: a **single-boundary move** (both
-  endpoints already on the same boundary) splits that boundary and its
-  region into two; a **double-boundary move** (endpoints on different
-  boundaries within the same region) merges those boundaries without
-  splitting the region at all
-- Plan: implement and fully test the single-boundary (split) case first,
-  then the double-boundary (merge) case, each checked against v0.9.1's
-  `checkInvariants` independently before moving to the next
-  - Confirm during the literature pass whether self-loops reduce to the
-  single-boundary case naturally or need distinct handling — the
-  reducer already special-cases self-loops for lives arithmetic, so
-  precedent exists either way
-- **Required before writing any of this:** a dedicated literature
-  verification pass (Čížek & Balko primarily), the same discipline
-  already applied for lives/degree rules at v0.6 and drawing feasibility
-  at v0.7 — not implemented from memory of earlier research
+- **Literature verification pass: DONE (July 2026)** — against the full
+  Čížek & Balko text (arXiv:2108.07671 including its appendix, which
+  carries the precise move-insertion formulas). The pass grew into a
+  full architectural review (six memos, session archive) and produced
+  a normative specification:
+  `docs/specifications/topological-model.md` — **draft, pending tech
+  lead approval; implementation blocked until approved**
+- Key outcomes, recorded here so this entry is readable without the
+  chat history:
+  - The v0.9.1 data model (boundaries as dot-id lists) cannot represent
+    positions once any dot has degree ≥ 1 — vertex *occurrences*
+    (corners) are the real primitive, per the paper's Fig. 13
+  - Authoritative state becomes: deterministic darts + rotation system
+    (σ) + containment anchors; faces/regions/boundaries/lives all
+    become derived (spec §4–§5)
+  - Split, merge, and self-loops are one uniform σ-operation (insert
+    four darts) plus containment reconciliation — the earlier
+    "implement split first, then merge, as two algorithms" plan is
+    superseded; the real case analysis lives in containment (spec §8)
+  - The paper's splice formulas become the property-test oracle, not
+    production code (spec §9.3, P-O1)
+  - Move is redefined: corner pair + occupant-subtree placement
+    function (spec §7); Game Records will need formatVersion 2
+- **Implementation is gated on the spec's proof obligations** P-O1
+  through P-O4 (P-O5 blocks only formatVersion 2) — see spec §11.3
+- **Open decision needed at the v0.9.2/v0.9.3 boundary (tech lead):**
+  O-Q1 — formatVersion 1 Game Records carry no corner data and are
+  ambiguous under the new model at degree-2 endpoints; default-corner
+  replay vs. rejection. Spec §12
+- **Minor cleanup candidate, not blocking:** `js/models.js`'s header
+  comment and doc-block still describe `createDot` as used by "the
+  engine layer" / "reserved for the game engine." Stale since the v0.5
+  cleanup that gave engine dots their coordinate-free `{ id, lives }`
+  shape — `createDot` is actually browser-only, used by
+  `selectionState.js` alone (see design.md's Models section, corrected
+  v0.9.1). Comment-only; worth fixing whenever `selectionState.js` is
+  next touched, e.g. if v0.9.2/v0.9.3 UI work goes near it
 
 #### v0.9.3 — Region-aware legality (not yet started)
 - `validateMove` gains a new coded violation (e.g. `DIFFERENT_REGIONS`)

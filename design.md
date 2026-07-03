@@ -150,12 +150,22 @@ history.
 
 ### Models (`js/models.js`)
 
-Defines `createDot` — the shared dot factory used by SelectionState and
-the engine layer.
+Defines `createDot(id, x, y)` — the browser-side dot factory, including
+screen coordinates. Used by `selectionState.js` only.
 
 The Move model lives in `engine/move.js` because a Move is a pure engine
-concept. createDot lives in models.js because dots are shared between
-the UI layer (layout) and the engine (game state).
+concept. `createDot` lives in `models.js` because it's a UI-layer
+concern — dots as laid out on screen, not dots as the engine represents
+them.
+
+Engine dots (`{ id, lives }`, no `x`/`y`) are constructed inline in
+`ui.js` and `gameRecord.js`, not via this factory. This wasn't always
+true — `createDot` predates the v0.5 cleanup that gave engine dots their
+coordinate-free shape — but the module's own header comment still
+describes it as shared with "the engine layer," which is stale. Not
+worth a standalone version bump to fix; noted here and flagged in
+ROADMAP.md as a pre-v0.9.2 cleanup candidate, since `selectionState.js`
+may already be under review by then.
 
 ---
 
@@ -466,6 +476,11 @@ part of a move's topological identity, not just its endpoints — which
 is why `engine/move.js` now carries a `regionId` field, even though it's
 a stub value (0) until `engine/regions.js` becomes real at v0.9.
 
+(Superseded for v0.9.2 onward: the v0.9.2 review found the corner, not
+the region, is the fundamental datum — regionId is derivable from it.
+See docs/specifications/topological-model.md §7 and the review banner
+under "Topological Model" below.)
+
 Their canonical string structure, summarised: positions split into
 independent **lands**; each land contains **regions**; each region
 contains one or more **boundaries** (a region can have multiple
@@ -608,6 +623,44 @@ now serving its first real purpose.
 ---
 
 ## Topological Model (v0.9)
+
+### v0.9.2 pre-implementation review — see the specification
+
+The literature verification pass required before v0.9.2 was completed
+in July 2026 and grew into a full architectural review. Its outcome is
+a normative specification:
+
+    docs/specifications/topological-model.md
+    (draft — pending tech lead approval)
+
+The specification supersedes the topological portions of this section
+for v0.9.2 onward. The subsections below are retained as design
+history — they record what was believed at v0.9/v0.9.1 and why — but
+several of their claims are now known to be superseded or wrong:
+
+- **"Every dot belongs to exactly one boundary" is false once any dot
+  has degree ≥ 1.** A degree-d vertex has d occurrences (corners)
+  across boundary walks, and they can lie on different boundaries.
+  It held at v0.9.1 only because every dot had degree 0. See spec
+  §5 (D3), §13.
+- **The boundary-orientation open question is resolved** (inner
+  boundaries clockwise, border boundary counterclockwise; every edge
+  borders two boundary-sides via its two darts). Spec §2.4, §11.2.
+- **Self-loops are the degenerate single-boundary case**, not a
+  separate operation. Spec §8.1–8.2.
+- **The lands question is closed: lands are derived**, not engine
+  state. Spec D8.
+- **`Move {startDotId, endDotId, regionId}` is superseded** — one
+  derived field too many, two fundamental components (corners,
+  placement) missing. Spec §7. This also supersedes the
+  "regionId is part of a move's topological identity" framing under
+  "Canonical Position Representation" above: the region is derivable
+  from the corner, so the corner subsumes the field.
+- **Split and merge are one uniform σ-operation** in the spec's model;
+  their differences live in containment reconciliation and derived
+  structure, not in separate mutation algorithms. The "two operations,
+  not one algorithm" framing below described the walk-primary model
+  and does not carry over. Spec §8.
 
 ### From graph to embedded planar graph
 
