@@ -306,12 +306,21 @@ stale header comment (already flagged in ROADMAP); sync version
 headers. Files: `js/models.js`. Tests: none (comment-only).
 Invariants: all 88 pass untouched.
 
-**PR 1 — dart layer (Stage A begins).** Objective: pure dart
+**PR 1 — dart layer (Stage A begins).** ✅ **COMPLETE** — merged to
+`main` (commits `0d65527`, `f94f709`), tagged `v0.9.2-pr1` as the
+pre-architectural-changes checkpoint. Objective: pure dart
 arithmetic over the existing edges array; no state change. Files:
 `js/engine/darts.js` (new), `tests/engine/darts.test.js` (new).
 Tests: dart↔edge↔origin correspondence, α involution, permanence
-under applyMove. Invariants after: behaviour identical; 88 + new
-tests pass.
+under applyMove. Invariants after: behaviour identical; 104 tests
+pass (100 original design + 4 added at implementation-review —
+independent synthetic fixtures for the origin convention, and
+explicit degree-0/isolated-vertex coverage). Implementation review
+found and fixed one Must-Fix (the original convention test compared
+against reducer-derived data rather than an independent fixture) and
+recorded a forward contract in the module header: PR 2's σ must
+always be exactly a permutation of `incidentDarts(edges, v)`, never
+independently maintained.
 
 **PR 2 — σ on state.** Objective: `rotations` seeded by
 `buildInitialTopology` and maintained by the reducer (default-corner
