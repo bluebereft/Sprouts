@@ -631,7 +631,7 @@ in July 2026 and grew into a full architectural review. Its outcome is
 a normative specification:
 
     docs/specifications/topological-model.md
-    (draft — pending tech lead approval)
+    (accepted — normative; migration path in docs/migration-plan.md)
 
 The specification supersedes the topological portions of this section
 for v0.9.2 onward. The subsections below are retained as design

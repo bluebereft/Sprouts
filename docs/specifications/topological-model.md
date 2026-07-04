@@ -1,6 +1,8 @@
 # A Mathematical Model Specification for the Sprouts Engine
 
-**Status:** Draft — pending tech lead approval; normative once approved.
+**Status:** Accepted (tech lead, July 2026) — normative.
+**Migration:** see `docs/migration-plan.md` for the path from the
+v0.9.1 engine to this model.
 **Applies from:** v0.9.2 onward.
 **Supersedes:** the topological portions of `design.md`'s "Topological
 Model" section. `design.md` remains authoritative for architecture

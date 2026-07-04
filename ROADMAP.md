@@ -457,8 +457,11 @@ different object.
   carries the precise move-insertion formulas). The pass grew into a
   full architectural review (six memos, session archive) and produced
   a normative specification:
-  `docs/specifications/topological-model.md` — **draft, pending tech
-  lead approval; implementation blocked until approved**
+  `docs/specifications/topological-model.md` — **accepted (tech lead,
+  July 2026); implementation proceeds per `docs/migration-plan.md`**
+  (PR-level sequence: darts → σ → tracer/oracle → Move v2 + corner
+  resolution → containment → cutover; then v0.9.3 legality and a
+  formatVersion-2 milestone)
 - Key outcomes, recorded here so this entry is readable without the
   chat history:
   - The v0.9.1 data model (boundaries as dot-id lists) cannot represent
