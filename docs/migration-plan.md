@@ -382,6 +382,45 @@ Every PR: compiles, all tests green, no observable behaviour change
 until PR 6 (which changes only what was already wrong — F1) and PR 7
 (which is the feature).
 
+### PR dependency graph
+
+```
+              PR 0 (hygiene)        [independent — any time]
+
+  PR 1 (darts)
+    │
+  PR 2 (σ on state) ────soft───┐   (σ format contract only;
+    │                          │    PR 3 fixtures are scripted)
+  PR 3 (tracer + oracle) ◄─────┘    discharges P-O1, P-O3
+    │
+  PR 4 (Move v2 + resolution)       needs σ (2) + tracer (3)
+    │
+  PR 5 (containment + inv. v2)      needs π from Move (4);
+    │                               discharges P-O2, P-O4
+  PR 6 (cutover, version bump)
+    │           │
+  PR 7 (legality)   PR 8 (record v2) ◄── GATE: O-Q1 ruling
+                    needs 4 + 6; independent of 7 (7-first is
+                    a product choice); discharges P-O5
+```
+
+Critical path: 1→2→3→4→5→6 (PRs 7 and 8 fork after 6). Only
+external gate: the O-Q1 ruling, needed before PR 8 — five PRs of
+schedule slack. Only useful parallelization: PR 3 alongside PR 2
+once the σ representation is written down; with one implementer,
+serial order is simpler and preferred.
+
+### PR 1 API note (adopted at design review)
+
+`incidentDarts(edges, vertexId)` — renamed from the drafted
+`dartsFrom` — returns a vertex's darts in ascending dart-id order,
+which is incidence, NOT rotation: no cyclic or geometric meaning.
+σ does not exist in darts.js and never will; when σ arrives (PR 2)
+it lives on engine state and is the only source of rotation order.
+Ascending dart-id order is nonetheless the deterministic base
+enumeration that §10.3's conventions build on, and must not be
+changed casually.
+
 ---
 
 ## Phase 8 — Technical debt: what dissolves, evolves, remains
