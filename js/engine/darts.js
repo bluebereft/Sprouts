@@ -16,16 +16,44 @@
    Pinned convention (permanent — do not change)
    ───────────────────────────────────────────────
    Edge k (0-based, creation order in the `edges` array) owns darts
-   2k and 2k+1:
+   2k and 2k+1. The dart COUNT and the α PAIRING (2k ↔ 2k+1) are
+   mandated by the accepted specification's S1
+   (docs/specifications/topological-model.md). The specific
+   assignment below — which of the two darts corresponds to which
+   named endpoint — is this project's own deterministic convention,
+   chosen to be consistent with S1, not dictated by it:
      - dart 2k   originates at edges[k].a
      - dart 2k+1 originates at edges[k].b
-   alpha(d) = d ^ 1 — the involution pairing a dart with its partner
-   on the same edge. This is arithmetic, never stored, per the
-   accepted specification's S1 (docs/specifications/topological-model.md).
+   alpha(d) = d ^ 1 is the involution itself, arithmetic and never
+   stored, per S1.
 
    Darts are permanent for the life of a game: edges are only ever
    appended (Sprouts never deletes), so a dart's origin, once set,
    never changes.
+
+   Preconditions (not checked at runtime)
+   ───────────────────────────────────────
+   Every function assumes `d` is a valid dart id in
+   [0, dartCount(edges)) for the given `edges` array, and that
+   `vertexId` is a valid vertex id. No bounds checking is performed;
+   an invalid id produces undefined/NaN silently rather than an
+   error. This matches the project's existing convention for pure
+   engine-layer functions (compare reducer.js's "assumes the move is
+   already legal") — callers are responsible for passing valid ids.
+
+   Forward contract for PR 2 (rotation system) — read before writing σ
+   ─────────────────────────────────────────────────────────────────────
+   This module has no notion of degree beyond raw incidence: degreeOf
+   counts darts found by scanning `edges`, not by consulting any
+   rotation system (none exists yet). The accepted specification's D5
+   defines deg(v) as |σ(v)| — the SIZE OF THE ROTATION at v, not this
+   incidence count. These two quantities are only guaranteed to agree
+   if PR 2's σ(v) is, for every vertex, always exactly a permutation
+   of incidentDarts(edges, v) — never a separately maintained or
+   independently seeded set. This is a hard requirement on PR 2, not
+   an incidental fact: if σ and incidentDarts are ever allowed to
+   diverge, degreeOf/degree-based invariants (e.g. lives = 3 − deg)
+   would silently check the wrong quantity.
 
    incidentDarts() — ordering warning
    ───────────────────────────────────

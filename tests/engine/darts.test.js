@@ -85,7 +85,21 @@ test('alpha: pairs 2k with 2k+1', () => {
 
 // ── Pinned origin convention ─────────────────────────────────────
 
-test('originOf: dart 2k originates at edges[k].a, dart 2k+1 at edges[k].b', () => {
+test('originOf: synthetic fixture — dart 2k is edges[k].a, dart 2k+1 is edges[k].b', () => {
+  // Independent of applyMove/createMove entirely: hand-written edges
+  // with values chosen so a and b are never equal and never mistaken
+  // for a dart id or index, so a convention bug (e.g. a/b swapped,
+  // or off-by-one in edgeOfDart) cannot coincidentally still pass.
+  const edges = [{ a: 7, b: 3 }, { a: 9, b: 1 }, { a: 4, b: 8 }];
+  assert.equal(originOf(edges, 0), 7);
+  assert.equal(originOf(edges, 1), 3);
+  assert.equal(originOf(edges, 2), 9);
+  assert.equal(originOf(edges, 3), 1);
+  assert.equal(originOf(edges, 4), 4);
+  assert.equal(originOf(edges, 5), 8);
+});
+
+test('originOf: dart 2k originates at edges[k].a, dart 2k+1 at edges[k].b (reducer-produced state)', () => {
   let state = freshState();
   state = applyMove(state, createMove(0, 1));
   const [edge0, edge1] = state.edges;
@@ -98,13 +112,44 @@ test('originOf: dart 2k originates at edges[k].a, dart 2k+1 at edges[k].b', () =
 
 // ── otherEndOf ───────────────────────────────────────────────────
 
-test('otherEndOf: agrees with the edge\'s opposite endpoint', () => {
+test('otherEndOf: synthetic fixture — resolves to the opposite named endpoint', () => {
+  const edges = [{ a: 7, b: 3 }, { a: 9, b: 1 }];
+  assert.equal(otherEndOf(edges, 0), 3); // dart 0 origin 7, other end 3
+  assert.equal(otherEndOf(edges, 1), 7); // dart 1 origin 3, other end 7
+  assert.equal(otherEndOf(edges, 2), 1);
+  assert.equal(otherEndOf(edges, 3), 9);
+});
+
+test('otherEndOf: agrees with the edge\'s opposite endpoint (reducer-produced state)', () => {
   let state = freshState();
   state = applyMove(state, createMove(0, 1));
   const [edge0] = state.edges;
 
   assert.equal(otherEndOf(state.edges, 0), edge0.b);
   assert.equal(otherEndOf(state.edges, 1), edge0.a);
+});
+
+// ── Degree-0 base case (isolated vertex) ─────────────────────────
+
+test('incidentDarts/degreeOf: an untouched dot has no incident darts and degree 0', () => {
+  // Sprouts' starting position is entirely isolated vertices — the
+  // spec explicitly treats degree-0 (empty rotation) as foundational
+  // (topological-model.md §2.3), so this base case gets its own test
+  // rather than only appearing incidentally after later moves.
+  const state = freshState();
+  assert.deepEqual(incidentDarts(state.edges, 0), []);
+  assert.deepEqual(incidentDarts(state.edges, 1), []);
+  assert.equal(degreeOf(state.edges, 0), 0);
+  assert.equal(degreeOf(state.edges, 1), 0);
+});
+
+test('incidentDarts/degreeOf: a dot remains degree 0 while untouched by other dots\' moves', () => {
+  let state = freshState();
+  state.dots.push({ id: 2, lives: 3 });
+  state.nextDotId = 3; // avoid colliding the new sprout with dot 2's id
+  state = applyMove(state, createMove(0, 1)); // dot 2 not involved
+  assert.deepEqual(incidentDarts(state.edges, 2), []);
+  assert.equal(degreeOf(state.edges, 2), 0);
 });
 
 // ── Normal move anatomy ──────────────────────────────────────────
