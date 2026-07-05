@@ -322,14 +322,27 @@ recorded a forward contract in the module header: PR 2's σ must
 always be exactly a permutation of `incidentDarts(edges, v)`, never
 independently maintained.
 
-**PR 2 — σ on state.** Objective: `rotations` seeded by
+**PR 2 — σ on state.** ✅ **COMPLETE** — merged to `main` (commit
+`6d5de93`). Objective: `rotations` seeded by
 `buildInitialTopology` and maintained by the reducer (default-corner
 insertion, documented as unobservable-by-construction). Files:
-`regions.js` (seeding), `reducer.js`, both call-site tests,
-`gameRecord.test.js` (round-trip re-derives σ). Tests: σ
-well-formedness per move; |σ(v)| = deg; lives = 3 − deg cross-check.
-Invariants after: legacy behaviour byte-identical (nothing reads σ);
-every existing test passes unmodified except state-shape assertions.
+`regions.js` (seeding), `reducer.js` — plus, discovered during
+implementation and not in the original estimate, three test fixture
+files (`reducer.test.js`, `darts.test.js`, `engine.test.js`) that
+build state by hand and needed `...buildInitialTopology(N)` added,
+since the reducer now assumes `state.rotations` is present (a real
+precondition of the feature, not scope creep — these fixtures were
+already incomplete representations of real state, just unexercised
+until the reducer started reading the field). `regions.test.js` and
+`gameRecord.test.js` gained genuinely new tests. Tests: σ
+well-formedness per move; |σ(v)| = deg(edges,v), cross-checked
+directly against PR 1's `darts.js`; prefix-preservation;
+round-trip determinism via Game Record replay. Invariants after:
+legacy behaviour byte-identical (nothing reads σ); 112/112 tests
+pass (104 prior + 8 new). One latent pre-existing fixture bug
+surfaced (a hand-built dot in `reducer.test.js` collides its id with
+the next sprout's) — currently harmless, still passing, left
+unfixed to avoid scope creep, noted as a future cleanup candidate.
 
 **PR 3 — tracer + oracle (Stage B).** Objective: faces/components/
 derived-view from (edges, σ); discharge P-O1 and P-O3. Files:
