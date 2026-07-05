@@ -5,6 +5,7 @@
 Build a browser-based implementation of Sprouts that evolves into a research platform for:
 
 - Playing Sprouts
+- Single-player puzzle mode with auto-generated, difficulty-graded levels
 - Saving and replaying games
 - Canonical topological representation
 - Database of unique positions
@@ -543,3 +544,84 @@ different object.
 - Position evaluation
 - Strategy learning
 - Compare learned strategy with known Sprouts mathematics
+
+---
+
+## Phase 5 — Single-Player Puzzle Mode (long-term track)
+
+A sudoku-style single-player game: the player is given a generated
+position and must play so that the opponent (the engine) is left with
+no legal moves. Recorded as a named destination so nearer-term work
+can be checked against it — nothing here changes any current
+migration PR.
+
+**Convention decision:** puzzles use normal play — last player able
+to move WINS. Misère is a separate future category, not a toggle.
+
+**Levels are seeds, not stored data.** A level is a generator seed:
+deterministic RNG + deterministic engine → the same puzzle,
+regenerated on demand, storing nothing — so wiping/resetting user
+record storage cannot lose levels, and seeds are shareable ids.
+(Internally the generator still builds positions by replaying a move
+sequence — replay is the engine's ONLY constructor for non-initial
+positions, per the two-level-truth architecture — but that sequence
+is transient generation machinery, never user-stored data.)
+
+**Mode selection is a UI concern, by construction.** The engine has
+no concept of who produces moves. Single vs. two player is which move
+SOURCE ui.js wires up at game start: pointer gestures for both turns,
+or gestures plus a bot function. When PR 4 reworks commitMove, keep
+the "move arrives → validate → commit" path source-agnostic — no
+speculative mode code, just don't foreclose a second source.
+
+### Tier 1 — minimal viable puzzle game (shortly after v1.0)
+
+Win-in-1: "make one right move and the AI is stuck." No runtime
+solver — a 1-ply check does everything:
+
+1. **Generate:** seeded random self-play from n dots to a terminal
+   position (uses v1.0's legal move enumeration); step back one ply —
+   a win-in-1 candidate by construction.
+2. **Classify:** for each legal move, apply + hasLegalMove. Winning
+   moves leave the AI stuck; the rest are wrong answers. Keep
+   candidates with at least one of each; winning/total ratio is the
+   difficulty knob.
+3. **Wrong-move feedback:** the AI's surviving reply is already known
+   from step 2. Display floor: highlight its endpoints + region.
+   Display target: draw it — via fast-path curve synthesis
+   (propose → validate with crossingDetection.js → perturb, retry),
+   made safe by the generator itself: **candidates whose AI replies
+   the fast path cannot draw are simply discarded**, so no
+   termination guarantee is needed at this tier. Satisficing plus
+   disposability replaces the routing fallback.
+
+### Tier 2 — win-in-N (AI takes real turns)
+
+Needs a real (still small) solver, a move-selection policy, and
+robust curve synthesis: a guaranteed-termination routing fallback for
+cramped positions (the AI must draw whatever the game reaches — no
+discard option mid-game), with correctness constraints (exit through
+the RIGHT corner; realize the bipartition) inherited from PR 4's
+corner/placement vocabulary — synthesis ≈ PR 4's resolution run in
+reverse. Čížek & Balko implement machine drawing; the literature
+path exists.
+
+### What the existing roadmap already provides
+Headless engine (generator/solver run anywhere); canonical encoding
+(Phase 2) for deduping generated levels at scale — optional at Tier 1,
+required for "auto-generated, gradually increasing" at scale;
+position database (Phase 2) as solved-puzzle cache; the containment
+forest (v0.9.2 spec) as the Sprague-Grundy decomposition solvers use.
+
+### Difficulty comes out of the engine
+Depth to win (win-in-1 … win-in-N); forgiveness (winning/legal
+ratio); technique required (region split, containment trap,
+lives-parity). Display is a browser concern, per the standing
+boundary.
+
+### Rough sequence
+Migration (current) → v0.9.3 → v1.0 (hasLegalMove, enumeration,
+game-over) → **Tier 1: seeded win-in-1 generator + 1-ply classifier +
+fast-path reply drawing** → canonical encoding (Phase 2) →
+small-n solver → graded generator at scale → **Tier 2: AI turns +
+robust synthesis**. The Tier 2 solver doubles as Phase 3's first bot.
