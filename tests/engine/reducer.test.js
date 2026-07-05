@@ -16,6 +16,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { applyMove } from '../../js/engine/reducer.js';
 import { createMove } from '../../js/engine/move.js';
+import { buildInitialTopology } from '../../js/engine/regions.js';
+import { degreeOf } from '../../js/engine/darts.js';
 
 function freshState() {
   return {
@@ -26,6 +28,7 @@ function freshState() {
     currentPlayer: 0,
     initialDotCount: 2,
     startingPlayer: 0,
+    ...buildInitialTopology(2),
   };
 }
 
@@ -154,4 +157,75 @@ test('applyMove: preserves initialDotCount and startingPlayer unchanged', () => 
   const result = applyMove(state, createMove(0, 1));
   assert.equal(result.initialDotCount, state.initialDotCount);
   assert.equal(result.startingPlayer, state.startingPlayer);
+});
+
+// ── σ (rotation system) maintenance — v0.9.2 PR 2 ─────────────────
+
+test('applyMove: normal move appends one new dart to each endpoint\'s rotation, sprout gets a 2-dart rotation', () => {
+  const result = applyMove(freshState(), createMove(0, 1));
+  const sprout = result.dots[result.dots.length - 1];
+  assert.deepEqual(result.rotations[0], [0]);
+  assert.deepEqual(result.rotations[1], [2]);
+  assert.deepEqual(result.rotations[sprout.id], [1, 3]);
+});
+
+test('applyMove: self-loop appends both new darts to the single vertex\'s rotation, sprout still gets 2 darts', () => {
+  const result = applyMove(freshState(), createMove(0, 0));
+  const sprout = result.dots[result.dots.length - 1];
+  assert.deepEqual(result.rotations[0], [0, 2]);
+  assert.deepEqual(result.rotations[sprout.id], [1, 3]);
+});
+
+test('applyMove: sigma partition — every dart appears in exactly one rotation entry, exactly once, across a scripted game', () => {
+  let state = freshState();
+  state.dots.push({ id: 2, lives: 3 });
+  state.rotations.push([]);
+  state.nextDotId = 3; // avoid colliding sprouts with dot 2's id
+  state = applyMove(state, createMove(0, 1));
+  state = applyMove(state, createMove(0, 2));
+  state = applyMove(state, createMove(2, 2)); // self-loop, dot 2 has 2 lives left
+
+  const totalDarts = 2 * state.edges.length;
+  const seen = new Array(totalDarts).fill(0);
+  state.rotations.forEach(rotation => {
+    rotation.forEach(dart => { seen[dart]++; });
+  });
+  for (let d = 0; d < totalDarts; d++) {
+    assert.equal(seen[d], 1, `dart ${d} appeared ${seen[d]} times, expected exactly 1`);
+  }
+});
+
+test('applyMove: rotations[v].length === degreeOf(edges, v) for every vertex, after every move (cross-check against darts.js)', () => {
+  let state = freshState();
+  state.dots.push({ id: 2, lives: 3 });
+  state.rotations.push([]);
+  state.nextDotId = 3; // avoid colliding sprouts with dot 2's id
+  const moves = [createMove(0, 1), createMove(0, 2), createMove(2, 2)];
+
+  for (const move of moves) {
+    state = applyMove(state, move);
+    for (const dot of state.dots) {
+      assert.equal(
+        state.rotations[dot.id].length,
+        degreeOf(state.edges, dot.id),
+        `rotation/degree mismatch for dot ${dot.id}`
+      );
+    }
+  }
+});
+
+test('applyMove: rotations for a vertex untouched by a move are unchanged (prefix-preservation)', () => {
+  let state = freshState();
+  state.dots.push({ id: 2, lives: 3 });
+  state.rotations.push([]);
+  state.nextDotId = 3; // avoid colliding the new sprout with dot 2's id
+  state = applyMove(state, createMove(0, 1)); // dot 2 not involved
+  assert.deepEqual(state.rotations[2], []);
+});
+
+test('applyMove: does not mutate the input state\'s rotations arrays', () => {
+  const state = freshState();
+  const before = state.rotations.map(r => [...r]);
+  applyMove(state, createMove(0, 1));
+  assert.deepEqual(state.rotations, before);
 });

@@ -47,14 +47,18 @@
 
 /**
  * Builds the starting topology for a fresh game: one region
- * containing one single-vertex boundary per dot.
+ * containing one single-vertex boundary per dot, and one empty
+ * rotation per dot (v0.9.2 — every dot starts at degree 0, so its
+ * rotation system entry is the empty array; see
+ * docs/specifications/topological-model.md §2.3).
  *
  * @param {number} dotCount — number of starting dots
  * @returns {{
  *   regions: Array<{id: number, boundaries: number[]}>,
  *   boundaries: Array<{id: number, vertices: number[]}>,
  *   nextRegionId: number,
- *   nextBoundaryId: number
+ *   nextBoundaryId: number,
+ *   rotations: number[][]
  * }}
  */
 export function buildInitialTopology(dotCount) {
@@ -68,11 +72,17 @@ export function buildInitialTopology(dotCount) {
     boundaries: boundaries.map(b => b.id),
   };
 
+  const rotations = [];
+  for (let i = 0; i < dotCount; i++) {
+    rotations.push([]);
+  }
+
   return {
     regions: [region],
     boundaries,
     nextRegionId: 1,
     nextBoundaryId: dotCount,
+    rotations,
   };
 }
 

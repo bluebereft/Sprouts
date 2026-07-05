@@ -82,6 +82,12 @@ test('buildInitialTopology: works correctly for the minimum case of 1 dot', () =
   assert.equal(topo.nextBoundaryId, 1);
 });
 
+test('buildInitialTopology: seeds one empty rotation per dot (v0.9.2 — degree-0 start)', () => {
+  const topo = buildInitialTopology(4);
+  assert.equal(topo.rotations.length, 4);
+  topo.rotations.forEach(rotation => assert.deepEqual(rotation, []));
+});
+
 // ── Query functions: getRegionForDot / getBoundaryForDot ────────
 
 test('getRegionForDot: real lookup gives the same answer as the old stub, for the seeded starting state', () => {

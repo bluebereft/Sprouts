@@ -124,6 +124,20 @@ test('round trip: reproduces identical starting topology (regions, boundaries)',
   assert.equal(result.state.nextBoundaryId, original.nextBoundaryId);
 });
 
+test('round trip: reproduces identical rotations (sigma)', () => {
+  // v0.9.2 — rotations are likewise derived/re-seeded, never
+  // persisted. Unlike regions/boundaries (which don't change yet,
+  // since no split/merge logic exists), rotations DO grow with every
+  // move (PR 2), so this test — unlike the one above — is actually
+  // exercising the reducer's sigma-maintenance determinism, not just
+  // buildInitialTopology's seeding: replaying the same moves through
+  // the same reducer must produce byte-identical rotations both times.
+  const original = playTwoMoves();
+  const result = importGame(exportGame(original));
+
+  assert.deepEqual(result.state.rotations, original.rotations);
+});
+
 test('round trip: reproduces edges with matching originatingMoveIndex', () => {
   // v0.8.6 — edge provenance must survive a full export/import cycle,
   // since renderer.js now depends on it entirely (no positional

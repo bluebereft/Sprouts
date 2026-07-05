@@ -17,6 +17,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import Engine from '../../js/engine/engine.js';
 import { createMove } from '../../js/engine/move.js';
+import { buildInitialTopology } from '../../js/engine/regions.js';
 
 /** Returns a fresh two-dot starting state, matching what ui.js
  *  constructs on game start (dots at full 3 lives, no edges yet). */
@@ -27,6 +28,7 @@ function freshState() {
     nextDotId: 2,
     moves: [],
     currentPlayer: 0,
+    ...buildInitialTopology(2),
   };
 }
 
@@ -90,6 +92,7 @@ test('apply(): an illegal self-loop (insufficient lives) is rejected and state i
   Engine.init({
     dots: [{ id: 0, lives: 1 }],
     edges: [], nextDotId: 1, moves: [], currentPlayer: 0,
+    ...buildInitialTopology(1),
   });
   const before = Engine.getState();
   const result = Engine.apply(createMove(0, 0));

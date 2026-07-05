@@ -17,6 +17,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { applyMove } from '../../js/engine/reducer.js';
 import { createMove } from '../../js/engine/move.js';
+import { buildInitialTopology } from '../../js/engine/regions.js';
 import {
   dartCount,
   edgeOfDart,
@@ -36,6 +37,7 @@ function freshState() {
     currentPlayer: 0,
     initialDotCount: 2,
     startingPlayer: 0,
+    ...buildInitialTopology(2),
   };
 }
 
@@ -146,6 +148,7 @@ test('incidentDarts/degreeOf: an untouched dot has no incident darts and degree 
 test('incidentDarts/degreeOf: a dot remains degree 0 while untouched by other dots\' moves', () => {
   let state = freshState();
   state.dots.push({ id: 2, lives: 3 });
+  state.rotations.push([]); // keep rotations in sync with dots (reducer assumes this)
   state.nextDotId = 3; // avoid colliding the new sprout with dot 2's id
   state = applyMove(state, createMove(0, 1)); // dot 2 not involved
   assert.deepEqual(incidentDarts(state.edges, 2), []);
@@ -185,6 +188,7 @@ test('incidentDarts/degreeOf: self-loop gives the looped dot degree 2 via parall
 test('degreeOf: lives === 3 - degreeOf(edges, id) holds for every dot across a scripted game', () => {
   let state = freshState();
   state.dots.push({ id: 2, lives: 3 });
+  state.rotations.push([]); // keep rotations in sync with dots (reducer assumes this)
   state.nextDotId = 3;
 
   state = applyMove(state, createMove(0, 1));
