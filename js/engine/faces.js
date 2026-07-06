@@ -154,3 +154,43 @@ export function traceFaces(edges, rotations) {
 
   return faces;
 }
+
+/**
+ * Resolves which face (from a traceFaces() result) a given corner
+ * belongs to — v0.9.2 PR 5, needed by containment.js and rules.js.
+ *
+ * A corner is "vertex v, position cornerIndex in rotations[v]"
+ * (spec §7.1; the indexing convention is pinned in move.js). The
+ * corner "after dart X" belongs to the SAME face as whichever face
+ * contains alpha(X): tracing computes φ(alpha(X)) = next-after(X) as
+ * the face's continuation through this exact corner, so the face
+ * containing alpha(X) is, by construction, the one this corner is
+ * part of.
+ *
+ * For a degree-0 vertex (empty rotation), there is exactly one
+ * trivial corner (index 0, ignored) and it belongs to that vertex's
+ * own trivial face (spec §2.4).
+ *
+ * IMPORTANT: `faces` MUST be the result of a single traceFaces()
+ * call — this function compares by array/object identity within
+ * that result, not by recomputing anything.
+ *
+ * @param {Array<{a:number,b:number}>} edges
+ * @param {number[][]} rotations
+ * @param {Array<{component:number, darts:number[]}>} faces
+ * @param {number} vertexId
+ * @param {number} cornerIndex
+ * @returns {?{component:number, darts:number[]}} the face, or null
+ *   if not found (shouldn't happen for well-formed input)
+ */
+export function cornerFace(edges, rotations, faces, vertexId, cornerIndex) {
+  const rotation = rotations[vertexId];
+
+  if (rotation.length === 0) {
+    return faces.find(f => f.darts.length === 0 && f.component === vertexId) ?? null;
+  }
+
+  const dart = rotation[cornerIndex];
+  const partner = alpha(dart);
+  return faces.find(f => f.darts.includes(partner)) ?? null;
+}

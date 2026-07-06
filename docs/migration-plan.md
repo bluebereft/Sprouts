@@ -363,25 +363,89 @@ nontrivial placement function π remain P-O1's residual, owed by
 **PR 5**, once containment exists to receive them. 126/126 tests
 passing (112 prior + 14 new); no production caller yet.
 
-**PR 4 — Move v2 + resolution (Stage C begins).** Objective: Moves
-carry real corners + placement; the browser resolves them. Files:
-`move.js`, `js/cornerResolution.js` (new), `ui.js` (commitMove +
-self-loop shortcut), `reducer.js` (insert at carried corner when
-present), tests for resolution geometry and corner insertion.
-Tests: resolution unit tests (pure, Node); degree-2 disambiguation;
-placement point-in-region cases. Invariants after: drawn games
-produce σ matching drawn geometry; legacy default remains for
-cornerless moves (replay of v1 records).
+**PR 4 — Move v2 + resolution (Stage C begins).** ✅ **COMPLETE** —
+merged to `main` (commit `9f7d089`). Objective: Moves
+carry real corners; the browser resolves them. Files:
+`move.js` (startCorner/endCorner/placement, all optional/nullable),
+`reducer.js` (corner-driven insertion via `applyCornerInsertions`,
+descending-index processing for same-vertex self-loop insertions;
+legacy append fallback unchanged for cornerless Moves), `rules.js`
+(corner-bounds checks, INCONSISTENT_CORNER_DATA, temporary
+PLACEMENT_NOT_YET_SUPPORTED guard), `js/cornerResolution.js` (new —
+pure angle-to-corner-index geometry). Tests: resolution unit tests
+(pure, Node, no DOM); corner-driven insertion incl. the self-loop
+shift-safety case; legacy fallback unchanged; corner-bounds and
+placement validation. **Two scope decisions made explicit at design
+review, not silently narrowed:** (1) `ui.js`/`boardView.js` NOT
+touched — real browser geometry integration needs DOM test
+infrastructure this project doesn't have; shipping it untested would
+violate the project's testing discipline, so the pure algorithm is
+built and tested, the adapter is deferred. (2) Region-aware legality
+("do these corners share a region") stays out of scope — confirmed
+during implementation that `validateMove` has never checked this;
+it remains v0.9.3/PR 7's job, unstarted, clean slate. Placement (π)
+support stays deliberately absent — containment doesn't exist until
+PR 5, so a non-empty placement is rejected rather than silently
+accepted. Invariants after: legacy (cornerless) games byte-identical
+to PR 2/3 behaviour; corner-driven games insert at the exact
+specified gap. 146/146 tests passing (126 prior + 20 new). Confirmed
+`gameRecord.js` needed ZERO changes — only two test fixtures needed
+adjusting (their comparison values incidentally picked up
+`createMove()`'s new default null fields) — good evidence Game
+Records are correctly shape-insulated from Move's growth, per the
+architecture's own design intent.
 
-**PR 5 — containment + invariants v2.** Objective: anchors on state,
-reconcile-always in the reducer, `checkInvariants` implementing
-I-1…I-7 (new codes, old checker untouched); discharge P-O2 and P-O4.
-Files: `regions.js` (seeding + new checker alongside old),
-`reducer.js`, `tests/engine/regions.test.js` additions, small-n
-bisimulation test. Tests: I-1…I-7 after every reducer step; merge
-re-anchoring; split transcription of π; exhaustive 1–3-dot
-bisimulation (P-O2). Invariants after: both topologies coexist; the
-old checker still guards the legacy arrays; all green.
+**PR 5 — containment + invariants v2.** ✅ **IMPLEMENTATION COMPLETE,
+not yet committed.** Objective: anchors on state, containment update
+in the reducer, `checkInvariantsV2` implementing I-1…I-7 (I-8
+deferred, see below; new codes, old `checkInvariants` untouched).
+Files: `js/engine/containment.js` (new — `resolveOuterFaceAnchor`,
+`resolveParentAnchor`, `computeK`, `updateContainmentForMerge`,
+`updateContainmentForSplit`, `checkContainmentInvariants`), one
+additive export to `faces.js` (`cornerFace`), `regions.js` (seeding +
+`checkInvariantsV2`, alongside the untouched legacy checker),
+`reducer.js` (classification + containment update, wired in after
+the existing σ-update). Tests: hand-built containment fixtures
+(same discipline as PR 3's faces.test.js); reducer integration tests
+for merge/split; `checkInvariantsV2` tests including I-6/I-7
+corruption detection; an exhaustive small-n walk (P-O2) for 1–3
+initial dots to depth 2. 175/175 tests passing (146 prior + 29 new).
+
+**Scope, restricted deliberately at design review, not silently:**
+containment is verified only for (a) merges of two root components
+with no occupants, and (b) splits with K = ∅ — matching PR 4's
+existing placement restriction. Nested containment (a component that
+already has its own occupants) is a known, explicit limitation.
+**Reassuring finding from the implementation review:** this
+restricted scope is *closed* under every move reachable from the
+natural starting state (all dots isolated) — root-merges only ever
+produce roots, K=∅ splits never create an occupant — so nothing in
+this universe ever becomes non-root. The restriction is the *entire*
+reachable state space, not a narrow slice of it, with one exception:
+
+**🚩 OPEN RISK, found by PR 5's own exhaustive test, must be resolved
+before browser wiring / real gameplay ships:** connecting two
+vertices *already in the same component* (a chord — e.g. closing a
+loop between two existing dots, not drawing a fresh self-loop) is
+neither a clean merge (only one component exists, not two) nor
+reliably a clean split (the two corners may be on different faces of
+that component) under the current classification. This is NOT a
+hypothetical edge case — chord moves are ordinary Sprouts play. The
+reducer currently produces a syntactically valid but mathematically
+meaningless containment update for this case, silently. Needs either
+(a) extending `containment.js`'s classification to handle it
+correctly, or (b) an explicit interim legality guard rejecting such
+moves until (a) lands. Documented in `containment.js`'s file header;
+tracked here so it can't get lost in a code comment. Blocks: any real
+two-player gameplay, not just a future PR's scope.
+
+**I-8 (π-domain exactness) deferred, walked back mid-implementation:**
+the original design proposed grounding `rules.js`'s placement check
+in real computed K (distinguishing "K happens to be nonempty" from
+"malformed placement data"). Decided against it during implementation
+— observable accept/reject behaviour is identical either way
+(placement is rejected regardless), so the added complexity wasn't
+justified yet. `rules.js` is unchanged from PR 4 in this PR.
 
 **PR 6 — cutover (Stage D; version → v0.9.2).** Objective: queries
 re-target the derived view; stored arrays, counters,

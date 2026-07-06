@@ -296,3 +296,62 @@ test('applyMove: corner-driven insertion still satisfies the sigma-partition inv
     assert.equal(seen[d], 1, `dart ${d} appeared ${seen[d]} times`);
   }
 });
+
+// ── Containment integration — v0.9.2 PR 5 ─────────────────────────
+//
+// Restricted scope (see containment.js's file header): merges of
+// two root components with no occupants, and splits with K = ∅.
+
+test('applyMove: merging two isolated dots produces one merged root component', () => {
+  const state = applyMove(freshState(), createMove(0, 1)); // bridge move
+  assert.deepEqual(Object.keys(state.outerFaceAnchor).sort(), ['0']);
+  assert.deepEqual(Object.keys(state.parentAnchor).sort(), ['0']);
+  assert.equal(state.parentAnchor[0], null); // still a root
+  assert.deepEqual(state.outerFaceAnchor[0], { kind: 'dart', value: 0 });
+});
+
+test('applyMove: self-loop containment — the sprout folds into the touched component\'s entry, not its own', () => {
+  // A genuinely single-dot fixture: freshState() has TWO dots, and a
+  // self-loop on dot 0 correctly leaves dot 1's entry untouched —
+  // this test isolates the specific claim "the sprout doesn't create
+  // a spurious extra containment entry" by using only one dot.
+  const state = {
+    dots: [{ id: 0, lives: 3 }],
+    edges: [], nextDotId: 1, moves: [], currentPlayer: 0,
+    initialDotCount: 1, startingPlayer: 0,
+    ...buildInitialTopology(1),
+  };
+  const result = applyMove(state, createMove(0, 0));
+  assert.deepEqual(Object.keys(result.outerFaceAnchor), ['0']);
+  assert.deepEqual(Object.keys(result.parentAnchor), ['0']);
+  assert.equal(result.parentAnchor[0], null);
+});
+
+test('applyMove: containment survives a 3-move scripted game (merge, then merge, then self-loop) with correct key sets at every step', () => {
+  let state = freshState();
+  state.dots.push({ id: 2, lives: 3 });
+  state.rotations.push([]);
+  state.outerFaceAnchor[2] = { kind: 'vertex', value: 2 };
+  state.parentAnchor[2] = null;
+  state.nextDotId = 3;
+
+  state = applyMove(state, createMove(0, 1)); // merge {0} and {1} -> {0}
+  assert.deepEqual(Object.keys(state.outerFaceAnchor).sort(), ['0', '2']);
+
+  state = applyMove(state, createMove(0, 2)); // merge {0,1,3} and {2} -> {0}
+  assert.deepEqual(Object.keys(state.outerFaceAnchor).sort(), ['0']);
+  assert.equal(state.parentAnchor[0], null);
+
+  state = applyMove(state, createMove(2, 2)); // self-loop on dot 2 (2 lives left) — split
+  assert.deepEqual(Object.keys(state.outerFaceAnchor).sort(), ['0']);
+  assert.equal(state.parentAnchor[0], null);
+});
+
+test('applyMove: containment update does not mutate the input state\'s anchor objects', () => {
+  const state = freshState();
+  const outerBefore = { ...state.outerFaceAnchor };
+  const parentBefore = { ...state.parentAnchor };
+  applyMove(state, createMove(0, 1));
+  assert.deepEqual(state.outerFaceAnchor, outerBefore);
+  assert.deepEqual(state.parentAnchor, parentBefore);
+});

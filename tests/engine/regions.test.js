@@ -32,8 +32,14 @@ import {
   areDotsOnSameBoundary,
   getBoundariesForRegion,
   checkInvariants,
+  checkInvariantsV2,
   TopologyError,
+  TopologyErrorV2,
 } from '../../js/engine/regions.js';
+import { applyMove } from '../../js/engine/reducer.js';
+import { createMove } from '../../js/engine/move.js';
+import { ContainmentError } from '../../js/engine/containment.js';
+import { getComponents } from '../../js/engine/faces.js';
 
 test('buildInitialTopology: produces exactly one region', () => {
   const topo = buildInitialTopology(3);
@@ -313,4 +319,149 @@ test('checkInvariants: reports multiple simultaneous violations, not just the fi
   const result = checkInvariants(state);
   assert.equal(result.ok, false);
   assert.ok(result.violations.length >= 1);
+});
+
+// ── checkInvariantsV2 (I-1…I-8) — v0.9.2 PR 5 ─────────────────────
+//
+// Fully additive alongside checkInvariants() above, which is
+// untouched by this PR and still guards the legacy stored arrays.
+
+function scriptedState(dotCount) {
+  return {
+    dots: Array.from({ length: dotCount }, (_, i) => ({ id: i, lives: 3 })),
+    edges: [], nextDotId: dotCount, moves: [], currentPlayer: 0,
+    initialDotCount: dotCount, startingPlayer: 0,
+    ...buildInitialTopology(dotCount),
+  };
+}
+
+test('checkInvariantsV2: the seeded starting state passes cleanly, for several dot counts', () => {
+  [1, 2, 3, 5].forEach(n => {
+    const result = checkInvariantsV2(scriptedState(n));
+    assert.deepEqual(result, { ok: true, violations: [] }, `failed for ${n} dots`);
+  });
+});
+
+test('checkInvariantsV2: passes after a merge move', () => {
+  const state = applyMove(scriptedState(2), createMove(0, 1));
+  const result = checkInvariantsV2(state);
+  assert.deepEqual(result, { ok: true, violations: [] });
+});
+
+test('checkInvariantsV2: passes after a split (self-loop) move', () => {
+  const state = applyMove(scriptedState(1), createMove(0, 0));
+  const result = checkInvariantsV2(state);
+  assert.deepEqual(result, { ok: true, violations: [] });
+});
+
+test('checkInvariantsV2: passes throughout a scripted multi-move game (merge, merge, self-loop)', () => {
+  let state = scriptedState(3);
+  state = applyMove(state, createMove(0, 1));
+  assert.deepEqual(checkInvariantsV2(state), { ok: true, violations: [] });
+  state = applyMove(state, createMove(0, 2));
+  assert.deepEqual(checkInvariantsV2(state), { ok: true, violations: [] });
+  state = applyMove(state, createMove(2, 2)); // dot 2 has 2 lives left
+  assert.deepEqual(checkInvariantsV2(state), { ok: true, violations: [] });
+});
+
+test('checkInvariantsV2: I-6 catches a hand-corrupted lives value', () => {
+  const state = applyMove(scriptedState(2), createMove(0, 1));
+  state.dots[0].lives = 99; // corrupt directly, bypassing the reducer
+  const result = checkInvariantsV2(state);
+  assert.equal(result.ok, false);
+  assert.ok(result.violations.some(v => v.rule === TopologyErrorV2.LIVES_INCONSISTENT));
+});
+
+test('checkInvariantsV2: I-7 catches a hand-corrupted total-lives value', () => {
+  const state = applyMove(scriptedState(2), createMove(0, 1));
+  state.dots[0].lives = state.dots[0].lives - 1; // silently remove a life from nowhere
+  const result = checkInvariantsV2(state);
+  assert.equal(result.ok, false);
+  assert.ok(result.violations.some(v => v.rule === TopologyErrorV2.TOTAL_LIVES_WRONG));
+});
+
+test('checkInvariantsV2: propagates a containment violation (I-1) from checkContainmentInvariants', () => {
+  const state = applyMove(scriptedState(2), createMove(0, 1));
+  delete state.outerFaceAnchor[0]; // corrupt directly
+  const result = checkInvariantsV2(state);
+  assert.equal(result.ok, false);
+  assert.ok(result.violations.some(v => v.rule === ContainmentError.KEY_SET_MISMATCH));
+});
+
+// ── P-O2: exhaustive small-n bisimulation ──────────────────────────
+//
+// Spec §11.3 P-O2: "all legal move sequences from 1–3 initial dots
+// to fixed depth; incremental apply vs. rebuild-by-replay must be
+// equivalent (§10.4) after every move." For containment specifically,
+// there is no "rebuild from nothing" — containment is proven not
+// derivable from (edges, sigma) alone (spec Appendix A.1), so the
+// only reconstruction method IS replaying moves through this same
+// reducer. What's actually checkable and meaningful here: (a)
+// checkInvariantsV2 holds after EVERY move of EVERY legal sequence,
+// exhaustively, within the restricted scope; (b) replaying the
+// identical sequence twice, independently, produces byte-identical
+// resulting containment (determinism / no hidden state).
+//
+// "Restricted scope" here means: self-loops (always trivially
+// same-face — see below) and moves between vertices in DIFFERENT
+// components (always a genuine root merge, since nothing in this
+// restricted universe ever becomes non-root — see containment.js's
+// file header for the closed-scope argument). EXCLUDED: connecting
+// two vertices already in the SAME component but potentially on
+// different faces of it — a case containment.js's own header now
+// names explicitly as unhandled, discovered by an earlier version of
+// this very test.
+
+function allLegalMoves(state) {
+  const moves = [];
+  const dotIds = state.dots.map(d => d.id);
+  const components = getComponents(state.edges, dotIds);
+  const componentOf = new Map();
+  components.forEach(members => members.forEach(id => componentOf.set(id, members[0])));
+
+  for (const a of state.dots) {
+    for (const b of state.dots) {
+      if (a.id > b.id) continue; // undirected; avoid duplicate (b,a)
+      const isLoop = a.id === b.id;
+      if (!isLoop && componentOf.get(a.id) === componentOf.get(b.id)) continue; // excluded — see header
+
+      const legal = isLoop ? a.lives >= 2 : (a.lives >= 1 && b.lives >= 1);
+      if (legal) moves.push(createMove(a.id, b.id));
+    }
+  }
+  return moves;
+}
+
+function exhaustiveWalk(dotCount, depth, path, state, assertFn) {
+  assertFn(state, path);
+  if (path.length >= depth) return;
+  for (const move of allLegalMoves(state)) {
+    const next = applyMove(state, move);
+    exhaustiveWalk(dotCount, depth, [...path, move], next, assertFn);
+  }
+}
+
+test('P-O2: checkInvariantsV2 holds after every move, for every legal sequence up to depth 2, for 1-3 initial dots', () => {
+  [1, 2, 3].forEach(dotCount => {
+    let sequenceCount = 0;
+    exhaustiveWalk(dotCount, 2, [], scriptedState(dotCount), (state, path) => {
+      sequenceCount++;
+      const result = checkInvariantsV2(state);
+      assert.ok(result.ok, `checkInvariantsV2 failed for ${dotCount} dots, path length ${path.length}: ${JSON.stringify(result.violations)}`);
+    });
+    assert.ok(sequenceCount > 1, `expected more than one state visited for ${dotCount} dots`);
+  });
+});
+
+test('P-O2: replaying the identical move sequence twice produces byte-identical containment (determinism)', () => {
+  const moves = [createMove(0, 1), createMove(0, 2), createMove(2, 2)];
+
+  let stateA = scriptedState(3);
+  moves.forEach(m => { stateA = applyMove(stateA, m); });
+
+  let stateB = scriptedState(3);
+  moves.forEach(m => { stateB = applyMove(stateB, m); });
+
+  assert.deepEqual(stateA.outerFaceAnchor, stateB.outerFaceAnchor);
+  assert.deepEqual(stateA.parentAnchor, stateB.parentAnchor);
 });

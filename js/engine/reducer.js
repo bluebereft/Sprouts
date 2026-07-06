@@ -52,6 +52,23 @@
    the endpoints — spec §8.1: a 2-element cyclic order is unique, so
    no corner/convention applies to it.
 
+   v0.9.2 PR 5 — containment update
+   ─────────────────────────────────
+   After the σ-update, the move is classified (split if both corners
+   resolved to the SAME face before the move, merge otherwise — spec
+   D7) and the corresponding containment update (spec §8.2) is
+   applied via containment.js. RESTRICTED to the cases verified at
+   PR 5 (see containment.js's file header): merges of two root
+   components with no occupants, and splits with K = ∅. Nested
+   containment is a known, documented limitation, not yet handled.
+
+   For legacy (cornerless) moves, classification uses an IMPLIED
+   corner — "after the last existing dart" (or the trivial corner 0
+   for degree-0), exactly matching what the append fallback above
+   already does structurally. This keeps classification well-defined
+   for every move this function accepts, without requiring a v1/v2
+   branch in the containment logic itself.
+
    IMPORTANT RULES:
    - NO DOM access
    - NO UI state
@@ -65,6 +82,9 @@
    - database storage
    ================================================================ */
 
+import { traceFaces, getComponents, cornerFace } from './faces.js';
+import { updateContainmentForMerge, updateContainmentForSplit } from './containment.js';
+
 /**
  * Applies a move to the current game state and returns a new state.
  *
@@ -75,6 +95,8 @@
  * @param {Array}  state.moves         - move history
  * @param {number} state.currentPlayer - 0 or 1
  * @param {Array}  state.rotations     - σ: rotations[v] = dart ids at v
+ * @param {object} state.outerFaceAnchor - containment (v0.9.2 PR 5)
+ * @param {object} state.parentAnchor    - containment (v0.9.2 PR 5)
  * @param {Object} move                - { startDotId, endDotId, regionId, startCorner, endCorner, placement }
  *
  * @returns {Object} new game state
@@ -192,6 +214,48 @@ export function applyMove(state, move) {
   appendDart(newDot.id, sproutDartA);
   appendDart(newDot.id, sproutDartB);
 
+  // 3c. Classification + containment update — see file header.
+  const oldFaces = traceFaces(state.edges, state.rotations); // BEFORE this move
+
+  function impliedCorner(vertexId) {
+    const len = state.rotations[vertexId].length;
+    return len === 0 ? 0 : len - 1;
+  }
+  const startCornerResolved = hasCorners ? move.startCorner : impliedCorner(startDotId);
+  const endCornerResolved   = hasCorners ? move.endCorner   : impliedCorner(endDotId);
+
+  const startFace = cornerFace(state.edges, state.rotations, oldFaces, startDotId, startCornerResolved);
+  const endFace   = cornerFace(state.edges, state.rotations, oldFaces, endDotId,   endCornerResolved);
+  const isSplit   = startFace === endFace;
+
+  const newFaces = traceFaces(newEdges, newRotations); // AFTER this move
+  const newDartsForThisMove = [startDart, sproutDartA, endDart, sproutDartB];
+
+  const componentsBefore = getComponents(state.edges, state.dots.map(d => d.id));
+
+  let newOuterFaceAnchor;
+  let newParentAnchor;
+
+  if (isSplit) {
+    const touchedComponent = componentsBefore.find(members => members.includes(startDotId));
+    const rep = touchedComponent[0];
+    ({ outerFaceAnchor: newOuterFaceAnchor, parentAnchor: newParentAnchor } =
+      updateContainmentForSplit(
+        state.outerFaceAnchor, state.parentAnchor, rep,
+        oldFaces, startFace, newFaces, newDartsForThisMove
+      ));
+  } else {
+    const startComponent = componentsBefore.find(members => members.includes(startDotId));
+    const endComponent   = componentsBefore.find(members => members.includes(endDotId));
+    const repA = startComponent[0];
+    const repB = endComponent[0];
+    ({ outerFaceAnchor: newOuterFaceAnchor, parentAnchor: newParentAnchor } =
+      updateContainmentForMerge(
+        state.outerFaceAnchor, state.parentAnchor, repA, repB,
+        newFaces, newDartsForThisMove
+      ));
+  }
+
   // 4. Append the new move to the move history.
   const newMoves = [
     ...(state.moves || []),
@@ -202,11 +266,13 @@ export function applyMove(state, move) {
   //    currentPlayer toggles between 0 and 1 after every move.
   return {
     ...state,
-    dots:          [...updatedDots, newDot],
-    edges:         newEdges,
-    moves:         newMoves,
-    nextDotId:     state.nextDotId + 1,
-    currentPlayer: state.currentPlayer === 0 ? 1 : 0,
-    rotations:     newRotations,
+    dots:            [...updatedDots, newDot],
+    edges:           newEdges,
+    moves:           newMoves,
+    nextDotId:       state.nextDotId + 1,
+    currentPlayer:   state.currentPlayer === 0 ? 1 : 0,
+    rotations:       newRotations,
+    outerFaceAnchor: newOuterFaceAnchor,
+    parentAnchor:    newParentAnchor,
   };
 }

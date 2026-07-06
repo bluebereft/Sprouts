@@ -47,14 +47,18 @@
    state, no other dependencies.
    ================================================================ */
 
-import { getComponents } from './faces.js';
+import { getComponents, traceFaces } from './faces.js';
+import { checkContainmentInvariants } from './containment.js';
 
 /**
  * Builds the starting topology for a fresh game: one region
- * containing one single-vertex boundary per dot, and one empty
- * rotation per dot (v0.9.2 — every dot starts at degree 0, so its
- * rotation system entry is the empty array; see
- * docs/specifications/topological-model.md §2.3).
+ * containing one single-vertex boundary per dot, one empty rotation
+ * per dot (v0.9.2 — every dot starts at degree 0, so its rotation
+ * system entry is the empty array; see
+ * docs/specifications/topological-model.md §2.3), and containment
+ * (v0.9.2 PR 5) seeding every dot as its own root component: each
+ * dot's outerFaceAnchor is its own trivial (isolated-vertex) face,
+ * and its parentAnchor is null (⊥ — the plane's outer region).
  *
  * @param {number} dotCount — number of starting dots
  * @returns {{
@@ -62,7 +66,9 @@ import { getComponents } from './faces.js';
  *   boundaries: Array<{id: number, vertices: number[]}>,
  *   nextRegionId: number,
  *   nextBoundaryId: number,
- *   rotations: number[][]
+ *   rotations: number[][],
+ *   outerFaceAnchor: object,
+ *   parentAnchor: object
  * }}
  */
 export function buildInitialTopology(dotCount) {
@@ -77,8 +83,12 @@ export function buildInitialTopology(dotCount) {
   };
 
   const rotations = [];
+  const outerFaceAnchor = {};
+  const parentAnchor = {};
   for (let i = 0; i < dotCount; i++) {
     rotations.push([]);
+    outerFaceAnchor[i] = { kind: 'vertex', value: i };
+    parentAnchor[i] = null;
   }
 
   return {
@@ -87,6 +97,8 @@ export function buildInitialTopology(dotCount) {
     nextRegionId: 1,
     nextBoundaryId: dotCount,
     rotations,
+    outerFaceAnchor,
+    parentAnchor,
   };
 }
 
@@ -296,6 +308,86 @@ export function checkInvariants(state) {
       V, E, F, C,
       expected: rhs,
       actual: lhs,
+    });
+  }
+
+  return { ok: violations.length === 0, violations };
+}
+
+// ── v0.9.2 PR 5 — new invariant checker (I-1…I-8) ────────────────
+
+/** Coded violations checkInvariantsV2() can report, beyond the
+ *  containment-specific ones re-exported from containment.js. */
+export const TopologyErrorV2 = {
+  EULER_FORMULA_VIOLATED: 'EULER_FORMULA_VIOLATED_V2',
+  LIVES_INCONSISTENT:     'LIVES_INCONSISTENT',
+  TOTAL_LIVES_WRONG:      'TOTAL_LIVES_WRONG',
+};
+
+/**
+ * Checks I-1 through I-8 (spec §9.2) against the NEW (σ +
+ * containment) topological model. Fully additive alongside the
+ * existing checkInvariants() above, which still guards the legacy
+ * stored regions/boundaries arrays — neither checker is modified by
+ * the other's existence, per the migration plan's explicit
+ * "old checker untouched" instruction for this PR.
+ *
+ * I-1…I-4 (containment structure) delegate to containment.js's
+ * checkContainmentInvariants(). I-5 (Euler) uses the COUNTING form
+ * F = ΣFc − C + 1 (spec D4) rather than building full region
+ * objects — that's PR 6's job, not needed for this invariant. I-6/
+ * I-7 (lives) are checked directly here. I-8 (π-domain exactness)
+ * is a Move-level check and lives in rules.js, not here.
+ *
+ * @param {object} state
+ * @returns {{ ok: boolean, violations: Array<object> }}
+ */
+export function checkInvariantsV2(state) {
+  const dotIds = state.dots.map(d => d.id);
+  const components = getComponents(state.edges, dotIds);
+  const faces = traceFaces(state.edges, state.rotations);
+
+  const containmentResult = checkContainmentInvariants(state, faces, components);
+  const violations = [...containmentResult.violations];
+
+  // I-5: global Euler, counting form.
+  const V = state.dots.length;
+  const E = state.edges.length;
+  const C = components.length;
+  const facesByComponent = new Map();
+  faces.forEach(f => {
+    facesByComponent.set(f.component, (facesByComponent.get(f.component) ?? 0) + 1);
+  });
+  const totalFacesAcrossComponents = [...facesByComponent.values()].reduce((a, b) => a + b, 0);
+  const F = totalFacesAcrossComponents - C + 1;
+  const lhs = V - E + F;
+  const rhs = 1 + C;
+  if (lhs !== rhs) {
+    violations.push({ rule: TopologyErrorV2.EULER_FORMULA_VIOLATED, V, E, F, C, expected: rhs, actual: lhs });
+  }
+
+  // I-6: lives(v) === 3 - deg(v), and >= 0, for every dot.
+  state.dots.forEach(dot => {
+    const degree = state.rotations[dot.id].length;
+    const expectedLives = 3 - degree;
+    if (dot.lives !== expectedLives || dot.lives < 0) {
+      violations.push({
+        rule: TopologyErrorV2.LIVES_INCONSISTENT,
+        dotId: dot.id,
+        lives: dot.lives,
+        expectedLives,
+      });
+    }
+  });
+
+  // I-7: total lives decreases by exactly 1 per move.
+  const totalLives = state.dots.reduce((sum, d) => sum + d.lives, 0);
+  const expectedTotal = 3 * state.initialDotCount - state.moves.length;
+  if (totalLives !== expectedTotal) {
+    violations.push({
+      rule: TopologyErrorV2.TOTAL_LIVES_WRONG,
+      totalLives,
+      expectedTotal,
     });
   }
 
