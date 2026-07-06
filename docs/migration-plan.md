@@ -345,13 +345,24 @@ the next sprout's) — currently harmless, still passing, left
 unfixed to avoid scope creep, noted as a future cleanup candidate.
 
 **PR 3 — tracer + oracle (Stage B).** Objective: faces/components/
-derived-view from (edges, σ); discharge P-O1 and P-O3. Files:
+derived-view from (edges, σ); discharge P-O1 and P-O3 for the
+tracer-expressible subset. Files:
 `js/engine/faces.js` (new), union-find extracted from `regions.js`,
 `tests/engine/faces.test.js` (new; includes the splice-formula
 oracle property tests). Tests: orbit tracing determinism (§10.3),
-per-component Euler, oracle agreement for normal/merge/split/loop
-insertions. Invariants after: P-O1/P-O3 recorded as discharged in the
-spec (§2.4 convention filled in); no production caller yet.
+per-component Euler, hand-traced oracle agreement for tree/bigon/
+triangle shapes. Invariants after: P-O1/P-O3 revised and partially
+discharged in the spec (§11.3). Finding from design review:
+clockwise vs. counterclockwise orientation isn't decidable from σ
+alone (depends on containment's outer-face designation, not the
+tracer), so P-O3 is resolved as "convention fixed arbitrarily, cw/ccw
+flip deferred to containment" rather than "matches the paper's
+labelling directly." General split/merge oracle cases carrying a
+nontrivial placement function π remain P-O1's residual, owed by
+**PR 5**, once containment exists to receive them. Implementation
+complete, 126/126 tests passing (112 prior + 14 new); no production
+caller yet. **Not yet committed** — awaiting merge, same as PR 1/PR 2
+before their commit.
 
 **PR 4 — Move v2 + resolution (Stage C begins).** Objective: Moves
 carry real corners + placement; the browser resolves them. Files:
@@ -496,11 +507,17 @@ own structure caps ambiguity — legal endpoints have degree ≤ 2, so
 resolution chooses between at most two corners, and often only one
 borders the drawn-through region.
 
-**R2 — Handedness/orientation mismatch (conceptual).** A consistent
-but mirror-imaged σ convention would pass many tests while breaking
-oracle agreement. *Mitigate:* P-O3 is discharged in PR 3, before any
-production caller exists; the convention is recorded in the spec
-once, and the oracle tests pin it forever after.
+**R2 — Handedness/orientation mismatch (conceptual).** *Revised after
+PR 3*: this risk was based on a false premise — that the tracer alone
+determines cw/ccw handedness. It doesn't (§2.4, revised); handedness
+is only meaningful relative to containment's outer-face designation.
+The real version of this risk moves to **PR 5**: a consistent but
+mirror-imaged containment/orientation choice there would pass
+structural checks while producing a position mismatched with the
+paper's specific labelling. *Mitigate:* resolve against a hand-traced
+case where the outer face is unambiguous by construction (e.g. a
+single bounded region with one occupant), pin it in the spec, then
+let PR 5's oracle tests hold it fixed.
 
 **R3 — v1 replay compatibility (migration).** v1 records lack
 corners; degree-2 replay is ambiguous (spec O-Q1). *Mitigate:* the

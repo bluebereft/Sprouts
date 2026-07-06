@@ -69,11 +69,15 @@ darts originating at it. A degree-0 vertex has an empty rotation.
 ### 2.4 Faces
 
 φ = σ ∘ α. For each connected component, the orbits of φ on that
-component's darts are the component's face boundary walks. Convention:
-φ traces each face keeping the face on the left. The exact
-correspondence between this convention and the literature's e/e^R
-walk notation is proof obligation P-O3 (§11.3) and MUST be recorded
-here once fixed.
+component's darts are the component's face boundary walks. The
+specific orientation (φ = next-in-rotation after α(d), rather than
+previous) is fixed arbitrarily by the tracer implementation (PR 3);
+choosing the other direction yields the mirror-image embedding,
+equally valid combinatorially. Which traced face is clockwise vs.
+counterclockwise in the sense of §11.2 is NOT determined by this
+choice alone — it depends on which face is externally designated the
+outer face, which is containment information (§3), not something a
+face tracer can resolve in isolation. See P-O3 (§11.3, revised).
 
 ### 2.5 Heffter–Edmonds
 
@@ -378,8 +382,10 @@ is no independent truth for such a check to compare against.
 
 `checkInvariants` MUST pass after every reducer step in tests. The
 Čížek–Balko splice formulas serve as the property-test oracle
-(P-O1): they are the specification the tracer is validated against,
-not production code.
+(P-O1) for the tracer-expressible subset of move types — see the
+revised P-O1 (§11.3): general split/merge oracle comparisons carrying
+a nontrivial placement function require containment (§3), which does
+not yet exist, and are PR 5's obligation.
 
 ## 10. Identity, naming, determinism
 
@@ -444,14 +450,33 @@ implementation review (arXiv:2108.07671 including its appendix):
 
 ### 11.3 Proof obligations (owed before or during v0.9.2)
 
-- **P-O1.** Property-test oracle: σ-insert-then-trace reproduces the
-  published splice results for every move type, including loop
-  degenerate cases.
+- **P-O1.** *Revised, PR 3.* Property-test oracle: σ-insert-then-
+  trace reproduces the published splice results, for the subset of
+  move types expressible from (edges, σ) alone — trees, single
+  cycles, bigons (a bridge/merge case and a degenerate self-loop
+  split case, both hand-traced and verified in
+  `tests/engine/faces.test.js`). General split/merge cases carrying a
+  nontrivial placement function π require containment (§3), which
+  does not exist until PR 5; the full oracle comparison for those
+  cases is PR 5's obligation, checked against real containment state
+  rather than PR 3's tracer alone.
 - **P-O2.** Exhaustive small-n bisimulation: all legal move sequences
   from 1–3 initial dots to fixed depth; incremental apply vs.
   rebuild-by-replay must be equivalent (§10.4) after every move.
-- **P-O3.** Fix and record the exact mapping between §2.4's
-  φ-convention and the paper's e/e^R walk convention.
+- **P-O3.** *Revised, PR 3.* Originally: fix and record the exact
+  mapping between §2.4's φ-convention and the paper's e/e^R walk
+  convention. Discovered during PR 3's design review: this mapping
+  is not decidable from the tracer alone. Hand-tracing showed every
+  structure with max degree ≤ 2 (paths, cycles — i.e. everything a
+  bare rotation system without containment can distinguish) gives
+  identical results under either φ-direction choice, and more
+  fundamentally, clockwise-vs-counterclockwise is meaningful only
+  relative to an externally designated outer face (§3), which the
+  tracer does not have. Resolution: φ's direction is fixed
+  arbitrarily (§2.4) and documented; matching the paper's specific
+  cw/ccw labelling is deferred to PR 5, applied as an orientation
+  flip at the containment layer once the outer face is known, not
+  built into the tracer.
 - **P-O4.** Placement freeness (Prop. 7.4): verify against the
   literature or by exhaustive small-case enumeration.
 - **P-O5.** Corner-index serialization round-trips under replay.

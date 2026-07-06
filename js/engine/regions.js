@@ -42,8 +42,12 @@
    they're tested against simple hand-built fixtures without needing
    that convention resolved first.
 
-   Depends on: nothing. Pure functions of engine state.
+   Depends on: js/engine/faces.js (getComponents, v0.9.2 PR 3) for
+   checkInvariants' Euler check. Otherwise pure functions of engine
+   state, no other dependencies.
    ================================================================ */
+
+import { getComponents } from './faces.js';
 
 /**
  * Builds the starting topology for a fresh game: one region
@@ -190,34 +194,17 @@ export const TopologyError = {
 };
 
 /**
- * Counts connected components over dots-as-nodes, edges-as-links,
- * via union-find with path compression. Used only by checkInvariants
- * for the Euler's formula check.
+ * Counts connected components over dots-as-nodes, edges-as-links.
+ * Delegates to faces.js's getComponents() (v0.9.2 PR 3) — this used
+ * to duplicate its own union-find here; now there is one
+ * implementation, shared with the face tracer. Behavior (the count
+ * returned) is unchanged.
  *
  * @param {object} state
  * @returns {number}
  */
 function countConnectedComponents(state) {
-  const parent = new Map();
-  state.dots.forEach(dot => parent.set(dot.id, dot.id));
-
-  function find(x) {
-    while (parent.get(x) !== x) {
-      parent.set(x, parent.get(parent.get(x)));
-      x = parent.get(x);
-    }
-    return x;
-  }
-  function union(x, y) {
-    const rootX = find(x);
-    const rootY = find(y);
-    if (rootX !== rootY) parent.set(rootX, rootY);
-  }
-
-  state.edges.forEach(edge => union(edge.a, edge.b));
-
-  const roots = new Set(state.dots.map(dot => find(dot.id)));
-  return roots.size;
+  return getComponents(state.edges, state.dots.map(d => d.id)).length;
 }
 
 /**
