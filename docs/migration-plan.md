@@ -344,7 +344,8 @@ surfaced (a hand-built dot in `reducer.test.js` collides its id with
 the next sprout's) — currently harmless, still passing, left
 unfixed to avoid scope creep, noted as a future cleanup candidate.
 
-**PR 3 — tracer + oracle (Stage B).** Objective: faces/components/
+**PR 3 — tracer + oracle (Stage B).** ✅ **COMPLETE** — merged to
+`main` (commit `e05d7c0`). Objective: faces/components/
 derived-view from (edges, σ); discharge P-O1 and P-O3 for the
 tracer-expressible subset. Files:
 `js/engine/faces.js` (new), union-find extracted from `regions.js`,
@@ -359,10 +360,8 @@ tracer), so P-O3 is resolved as "convention fixed arbitrarily, cw/ccw
 flip deferred to containment" rather than "matches the paper's
 labelling directly." General split/merge oracle cases carrying a
 nontrivial placement function π remain P-O1's residual, owed by
-**PR 5**, once containment exists to receive them. Implementation
-complete, 126/126 tests passing (112 prior + 14 new); no production
-caller yet. **Not yet committed** — awaiting merge, same as PR 1/PR 2
-before their commit.
+**PR 5**, once containment exists to receive them. 126/126 tests
+passing (112 prior + 14 new); no production caller yet.
 
 **PR 4 — Move v2 + resolution (Stage C begins).** Objective: Moves
 carry real corners + placement; the browser resolves them. Files:
