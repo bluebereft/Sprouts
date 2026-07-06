@@ -90,12 +90,24 @@ test('exportGameToJSON: produces valid, parseable JSON', () => {
 // ── importGame: round trip ──────────────────────────────────────
 
 test('round trip: importGame(exportGame(state)) reproduces the same moves', () => {
+  // v0.9.2 PR 4: createMove() now defaults startCorner/endCorner/
+  // placement to null, so a LIVE game's state.moves may carry those
+  // extra (null) fields, while importGame() always reconstructs the
+  // minimal v1 shape (Game Records are still formatVersion 1 and
+  // never carry corner data — see move.js/gameRecord.js file
+  // headers). The round-trip guarantee that actually matters is
+  // over the v1-meaningful fields; comparing extra incidental nulls
+  // would conflate "same game" with "byte-identical Move object",
+  // which even the spec's own state-equivalence principle (§10.4)
+  // says not to do.
   const original = playTwoMoves();
   const record = exportGame(original);
   const result = importGame(record);
 
+  const toV1Shape = m => ({ startDotId: m.startDotId, endDotId: m.endDotId, regionId: m.regionId });
+
   assert.equal(result.ok, true);
-  assert.deepEqual(result.state.moves, original.moves);
+  assert.deepEqual(result.state.moves.map(toV1Shape), original.moves.map(toV1Shape));
 });
 
 test('round trip: reproduces identical dots, edges, and currentPlayer', () => {
@@ -156,8 +168,11 @@ test('round trip: via JSON string end to end', () => {
   const json = exportGameToJSON(original);
   const result = importGameFromJSON(json);
 
+  // Same v1-shape comparison rationale as the round-trip test above.
+  const toV1Shape = m => ({ startDotId: m.startDotId, endDotId: m.endDotId, regionId: m.regionId });
+
   assert.equal(result.ok, true);
-  assert.deepEqual(result.state.moves, original.moves);
+  assert.deepEqual(result.state.moves.map(toV1Shape), original.moves.map(toV1Shape));
 });
 
 test('round trip: works for a game with startingPlayer 1', () => {

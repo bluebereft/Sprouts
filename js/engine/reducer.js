@@ -1,5 +1,5 @@
  /* ================================================================
-   reducer.js — Sprouts Engine Core (v0.9.2)
+   reducer.js — Sprouts Engine Core (v0.9.2 — PR 4)
 
    Responsibility
    ──────────────
@@ -20,28 +20,37 @@
    rotations via buildInitialTopology(), the same way v0.9 fixtures
    already had to start seeding regions/boundaries.
 
-   v0.9.2 — σ (rotation system) maintenance
-   ─────────────────────────────────────────
+   v0.9.2 PR 2/3 — σ (rotation system) maintenance
+   ─────────────────────────────────────────────────
    state.rotations[v] is the array of dart ids originating at vertex
-   v, in insertion order. Per the accepted specification's S1, edge k
-   owns darts 2k/2k+1 (see js/engine/darts.js for the pinned
-   convention; this file uses the same arithmetic directly rather
-   than importing darts.js, since only edge-index → dart-id
-   arithmetic is needed here, not any of darts.js's dart-based
-   lookups — see docs/migration-plan.md's PR 2 design notes).
+   v. Per the accepted specification's S1, edge k owns darts 2k/2k+1
+   (see js/engine/darts.js for the pinned convention; this file uses
+   the same arithmetic directly rather than importing darts.js, since
+   only edge-index → dart-id arithmetic is needed here).
 
-   Every move performs exactly ONE uniform update, regardless of
-   normal/loop distinctions (spec §8.1): for each of the two new
-   edges {a, b}, append dart 2k to rotations[a] and dart 2k+1 to
-   rotations[b]. A self-loop's two new edges share the same `a`
-   vertex, so that vertex simply receives both new darts, in edge-
-   creation order — no branch is needed anywhere below.
+   v0.9.2 PR 4 — corner-driven insertion
+   ────────────────────────────────────────
+   If move.startCorner and move.endCorner are both present (the v2
+   Move shape, spec §7.1-7.2), the new darts are inserted at exactly
+   those corners — real σ, not a placeholder. If either is absent
+   (the legacy v1 shape, e.g. a replayed formatVersion 1 Game
+   Record), both new endpoint darts fall back to APPEND, unchanged
+   from PR 2 (documented legacy path, spec open question O-Q1).
 
-   Insertion position within each vertex's rotation is currently a
-   deterministic placeholder (append at the end) — nothing reads
-   rotation ORDER yet, only membership and cardinality (see
-   docs/specifications/topological-model.md §8.1, and the migration
-   plan's Stage A). Real corner-driven insertion arrives at PR 4.
+   Every move still performs exactly ONE uniform update regardless of
+   normal/loop distinctions (spec §8.1) — corner-driven insertion is
+   uniform too: a self-loop's two insertions target the SAME vertex,
+   handled by applyCornerInsertions() processing both against the
+   ORIGINAL (pre-move) rotation in descending corner-index order, so
+   neither insertion invalidates the other's target position. Ties
+   (both corners naming the same gap) are broken deterministically
+   but arbitrarily — the orientation-sensitive version of that choice
+   is deferred to PR 5 (spec P-O3, revised at PR 3).
+
+   The new sprout's rotation is ALWAYS built fresh via append, in
+   creation order, regardless of whether real corners were used for
+   the endpoints — spec §8.1: a 2-element cyclic order is unique, so
+   no corner/convention applies to it.
 
    IMPORTANT RULES:
    - NO DOM access
@@ -66,7 +75,7 @@
  * @param {Array}  state.moves         - move history
  * @param {number} state.currentPlayer - 0 or 1
  * @param {Array}  state.rotations     - σ: rotations[v] = dart ids at v
- * @param {Object} move                - { startDotId, endDotId, regionId }
+ * @param {Object} move                - { startDotId, endDotId, regionId, startCorner, endCorner, placement }
  *
  * @returns {Object} new game state
  */
@@ -127,11 +136,7 @@ export function applyMove(state, move) {
     }
   ];
 
-  // 3b. σ maintenance — see file header. One uniform rule, applied
-  //     to both new edges unconditionally; a self-loop's shared `a`
-  //     vertex naturally receives both appends in sequence below,
-  //     since appendDart always reads/writes the SAME running
-  //     newRotations array, never the original (stale) state.
+  // 3b. σ maintenance — see file header.
   const newRotations = state.rotations.map(r => r.slice());
   newRotations.push([]); // fresh, empty rotation for the new sprout
 
@@ -139,10 +144,53 @@ export function applyMove(state, move) {
     newRotations[vertexId] = [...newRotations[vertexId], dart];
   }
 
-  appendDart(startDotId, 2 * firstEdgeIndex);           // edge L's 'a' dart
-  appendDart(newDot.id,  2 * firstEdgeIndex + 1);        // edge L's 'b' dart
-  appendDart(endDotId,   2 * (firstEdgeIndex + 1));      // edge L+1's 'a' dart
-  appendDart(newDot.id,  2 * (firstEdgeIndex + 1) + 1);  // edge L+1's 'b' dart
+  // Applies one or more corner-indexed insertions to a SINGLE
+  // vertex's rotation, all expressed as indices into the ORIGINAL
+  // (pre-this-move) array. Descending original-index order ensures
+  // each splice only affects positions after ones already handled —
+  // see file header for why this matters for self-loops.
+  function applyCornerInsertions(vertexId, insertions) {
+    const sorted = [...insertions].sort((a, b) => b.cornerIndex - a.cornerIndex);
+    let rotation = newRotations[vertexId];
+    for (const { cornerIndex, dart } of sorted) {
+      if (rotation.length === 0) {
+        rotation = [dart];
+      } else {
+        const updated = rotation.slice();
+        updated.splice(cornerIndex + 1, 0, dart);
+        rotation = updated;
+      }
+    }
+    newRotations[vertexId] = rotation;
+  }
+
+  const hasCorners = move.startCorner !== null && move.startCorner !== undefined
+                   && move.endCorner  !== null && move.endCorner  !== undefined;
+
+  const startDart   = 2 * firstEdgeIndex;
+  const sproutDartA = 2 * firstEdgeIndex + 1;
+  const endDart     = 2 * (firstEdgeIndex + 1);
+  const sproutDartB = 2 * (firstEdgeIndex + 1) + 1;
+
+  if (hasCorners) {
+    if (isLoop) {
+      applyCornerInsertions(startDotId, [
+        { cornerIndex: move.startCorner, dart: startDart },
+        { cornerIndex: move.endCorner,   dart: endDart },
+      ]);
+    } else {
+      applyCornerInsertions(startDotId, [{ cornerIndex: move.startCorner, dart: startDart }]);
+      applyCornerInsertions(endDotId,   [{ cornerIndex: move.endCorner,   dart: endDart   }]);
+    }
+  } else {
+    appendDart(startDotId, startDart);
+    appendDart(endDotId, endDart);
+  }
+
+  // Sprout's rotation: always fresh append, in creation order — see
+  // file header (no corner/convention applies to a new vertex).
+  appendDart(newDot.id, sproutDartA);
+  appendDart(newDot.id, sproutDartB);
 
   // 4. Append the new move to the move history.
   const newMoves = [

@@ -229,3 +229,70 @@ test('applyMove: does not mutate the input state\'s rotations arrays', () => {
   applyMove(state, createMove(0, 1));
   assert.deepEqual(state.rotations, before);
 });
+
+// ── Corner-driven insertion — v0.9.2 PR 4 ──────────────────────────
+
+test('applyMove: with corners, inserts the new dart at the exact specified gap, not appended', () => {
+  // Give dot 0 an existing rotation of 3 darts (from prior moves),
+  // then make a move with startCorner=1 (insert after position 1).
+  let state = freshState();
+  state = applyMove(state, createMove(0, 1)); // dot0 rotation: [0]
+  state = applyMove(state, createMove(0, 1)); // dot0 rotation: [0, 4] (appended, legacy path)
+  state = applyMove(state, createMove(0, 1)); // dot0 rotation: [0, 4, 8]
+  assert.deepEqual(state.rotations[0], [0, 4, 8]);
+
+  const beforeEdgeCount = state.edges.length;
+  const newStartDart = 2 * beforeEdgeCount; // the dart this move will create at dot0
+
+  state = applyMove(state, createMove(0, 1, 0, 1, 0)); // startCorner=1, endCorner=0
+  // Inserted immediately after position 1 (dart 4): [0, 4, newStartDart, 8]
+  assert.deepEqual(state.rotations[0], [0, 4, newStartDart, 8]);
+});
+
+test('applyMove: without corners (legacy shape), falls back to append — unchanged from PR 2', () => {
+  let state = freshState();
+  state = applyMove(state, createMove(0, 1));
+  state = applyMove(state, createMove(0, 1));
+  const beforeEdgeCount = state.edges.length;
+  const newStartDart = 2 * beforeEdgeCount;
+
+  state = applyMove(state, createMove(0, 1)); // no corner args — legacy path
+  assert.deepEqual(state.rotations[0], [0, 4, newStartDart]);
+});
+
+test('applyMove: self-loop with real corners inserts both new darts correctly without index shift corruption', () => {
+  // Give dot 0 a 3-dart rotation first, then a self-loop with both
+  // corners on dot 0 — this is exactly the case the reducer's
+  // descending-order processing exists for (see file header).
+  let state = freshState();
+  state = applyMove(state, createMove(0, 1)); // dot0: [0]
+  state = applyMove(state, createMove(0, 1)); // dot0: [0, 4]
+  assert.deepEqual(state.rotations[0], [0, 4]);
+  // dot0 has 2 lives left (started 3, -1 twice) — sufficient for a loop (needs >=2)
+
+  const beforeEdgeCount = state.edges.length; // 4
+  const startDart = 2 * beforeEdgeCount;       // 8
+  const endDart    = 2 * (beforeEdgeCount + 1); // 10
+
+  // Self-loop: startCorner=1 (after dart 4), endCorner=0 (after dart 0).
+  state = applyMove(state, createMove(0, 0, 0, 1, 0));
+  // Expected: process descending by original index — endCorner(0)
+  // is lower than startCorner(1), so startCorner's insertion is
+  // handled first against the original array, landing dart 8 after
+  // position 1: [0, 4, 8]. Then endCorner=0 (original) inserts dart
+  // 10 after position 0: [0, 10, 4, 8].
+  assert.deepEqual(state.rotations[0], [0, 10, 4, 8]);
+});
+
+test('applyMove: corner-driven insertion still satisfies the sigma-partition invariant', () => {
+  let state = freshState();
+  state = applyMove(state, createMove(0, 1));
+  state = applyMove(state, createMove(0, 1, 0, 0, 0));
+
+  const totalDarts = 2 * state.edges.length;
+  const seen = new Array(totalDarts).fill(0);
+  state.rotations.forEach(r => r.forEach(d => { seen[d]++; }));
+  for (let d = 0; d < totalDarts; d++) {
+    assert.equal(seen[d], 1, `dart ${d} appeared ${seen[d]} times`);
+  }
+});

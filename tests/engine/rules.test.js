@@ -144,3 +144,135 @@ test('validateMove: a fully-legal normal move has zero violations', () => {
   const result = validateMove(state, { startDotId: 0, endDotId: 1, regionId: 0 });
   assert.deepEqual(result, { ok: true, violations: [] });
 });
+
+// ── validateMove: corner and placement checks — v0.9.2 PR 4 ──────
+
+test('validateMove: accepts valid in-range corners for both endpoints', () => {
+  const state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
+    rotations: [[0, 2], [4]], // dot0 degree 2 (valid corners 0-1), dot1 degree 1 (valid corner 0)
+  };
+  const result = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, startCorner: 1, endCorner: 0, placement: null,
+  });
+  assert.equal(result.ok, true);
+});
+
+test('validateMove: rejects an out-of-range startCorner', () => {
+  const state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
+    rotations: [[0, 2], []],
+  };
+  const result = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, startCorner: 5, endCorner: 0, placement: null,
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.violations, [
+    { rule: RuleError.START_CORNER_OUT_OF_RANGE, dotId: 0 },
+  ]);
+});
+
+test('validateMove: rejects an out-of-range endCorner', () => {
+  const state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
+    rotations: [[], [4]],
+  };
+  const result = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, startCorner: 0, endCorner: 3, placement: null,
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.violations, [
+    { rule: RuleError.END_CORNER_OUT_OF_RANGE, dotId: 1 },
+  ]);
+});
+
+test('validateMove: degree-0 vertex accepts corner index 0 only', () => {
+  const state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
+    rotations: [[], []],
+  };
+  const okResult = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, startCorner: 0, endCorner: 0, placement: null,
+  });
+  assert.equal(okResult.ok, true);
+
+  const badResult = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, startCorner: 1, endCorner: 0, placement: null,
+  });
+  assert.equal(badResult.ok, false);
+  assert.deepEqual(badResult.violations, [
+    { rule: RuleError.START_CORNER_OUT_OF_RANGE, dotId: 0 },
+  ]);
+});
+
+test('validateMove: rejects inconsistent corner data (one corner given, not the other)', () => {
+  const state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
+    rotations: [[], []],
+  };
+  const result = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, startCorner: 0, endCorner: null, placement: null,
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.violations, [
+    { rule: RuleError.INCONSISTENT_CORNER_DATA, dotId: 0 },
+  ]);
+});
+
+test('validateMove: legacy shape (no corners at all) is still valid — no INCONSISTENT_CORNER_DATA violation', () => {
+  const state = { dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }] };
+  const result = validateMove(state, { startDotId: 0, endDotId: 1, regionId: 0 });
+  assert.equal(result.ok, true);
+});
+
+test('validateMove: self-loop checks endCorner against the same vertex\'s rotation independently of startCorner', () => {
+  const state = {
+    dots: [{ id: 0, lives: 3 }],
+    rotations: [[0, 2, 4]], // degree 3, valid corners 0-2
+  };
+  const okResult = validateMove(state, {
+    startDotId: 0, endDotId: 0, regionId: 0, startCorner: 0, endCorner: 2, placement: null,
+  });
+  assert.equal(okResult.ok, true);
+
+  const badResult = validateMove(state, {
+    startDotId: 0, endDotId: 0, regionId: 0, startCorner: 0, endCorner: 9, placement: null,
+  });
+  assert.equal(badResult.ok, false);
+  assert.deepEqual(badResult.violations, [
+    { rule: RuleError.END_CORNER_OUT_OF_RANGE, dotId: 0 },
+  ]);
+});
+
+test('validateMove: rejects a non-empty placement (temporary restriction — see rules.js file header)', () => {
+  const state = { dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }] };
+  const result = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, placement: { someComponent: 1 },
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.violations, [
+    { rule: RuleError.PLACEMENT_NOT_YET_SUPPORTED, dotId: 0 },
+  ]);
+});
+
+test('validateMove: rejects a negative corner index', () => {
+  const state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
+    rotations: [[0, 2], []],
+  };
+  const result = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, startCorner: -1, endCorner: 0, placement: null,
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.violations, [
+    { rule: RuleError.START_CORNER_OUT_OF_RANGE, dotId: 0 },
+  ]);
+});
+
+test('validateMove: accepts null placement and empty-object placement equally', () => {
+  const state = { dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }] };
+  const nullResult = validateMove(state, { startDotId: 0, endDotId: 1, regionId: 0, placement: null });
+  const emptyResult = validateMove(state, { startDotId: 0, endDotId: 1, regionId: 0, placement: {} });
+  assert.equal(nullResult.ok, true);
+  assert.equal(emptyResult.ok, true);
+});
