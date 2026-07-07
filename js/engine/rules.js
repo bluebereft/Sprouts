@@ -1,5 +1,5 @@
  /* ================================================================
-   rules.js — Sprouts Engine Rules (v0.9.2 — PR 5b)
+   rules.js — Sprouts Engine Rules (v0.9.2 — PR 7 / v0.9.3)
 
    Responsibility
    ──────────────
@@ -18,56 +18,50 @@
 
    v0.9.2 PR 4 — corner and placement checks
    ────────────────────────────────────────────
-   validateMove gained checks for the v2 Move shape's startCorner/
-   endCorner/placement fields (move.js). These check bounds and
-   presence only — general region/topological legality remains
-   v0.9.3's (PR 7's) job.
+   validateMove checks the v2 Move shape's startCorner/endCorner/
+   placement fields (move.js) for bounds and presence.
 
-   placement is temporarily REQUIRED to be null/empty for every move
-   validated by this version — containment doesn't exist until PR 5,
-   so there's nothing to check a non-empty placement against yet.
-   This is a deliberate, temporary restriction (PLACEMENT_NOT_YET_
-   SUPPORTED), not a permanent rule.
+   v0.9.3 PR 7 — general region legality (DIFFERENT_REGIONS)
+   ─────────────────────────────────────────────────────────────────
+   validateMove now checks whether a move's two corners actually
+   border the same region (spec §7.3), using regions.js's
+   areDotsInSameRegion() — the general, containment-aware check
+   built at PR 6.
 
-   v0.9.2 PR 5b — same-component, different-face is ALWAYS illegal
-   ───────────────────────────────────────────────────────────────────
-   Found by PR 5's own exhaustive test (P-O2): a move whose two
-   corners belong to the SAME component but land on DIFFERENT faces
-   of it is illegal, unconditionally — not a restricted-scope gap,
-   a general mathematical fact.
+   This REPLACES PR 5b's narrower SAME_COMPONENT_DIFFERENT_FACE check
+   entirely, per that check's own file-header note ("PR 7 should
+   generalize or absorb this check, not duplicate it"). PR 5b proved
+   same-component/different-face is always illegal; that's now just
+   one instance the general DIFFERENT_REGIONS check catches, so
+   keeping both would mean two violation codes firing for one
+   underlying problem. There is no narrower check left standing.
 
-   Proof: spec D4 defines region identity as a function of (host
-   component, host face) — each face of a component hosts exactly
-   one region, and two DISTINCT faces of the SAME component always
-   host two DISTINCT regions (there is no mechanism in D4 by which
-   two different faces of one component could resolve to the same
-   region). Spec §7.3 requires both corners of a legal Move to
-   border the SAME region. Two corners on different faces of the
-   same component therefore always border different regions, and
-   the move is always illegal. This holds in full generality — it is
-   NOT dependent on PR 5's restricted containment scope.
+   v0.9.3 PR 7 — I-8, grounded in real K (NONEMPTY_K_NOT_YET_SUPPORTED)
+   ─────────────────────────────────────────────────────────────────────
+   For a classified split (same-face) move, K (the region's real
+   occupants, excluding the touched component — spec §7.2) is now
+   actually computed via containment.js's computeK(), rather than
+   placement being blanket-rejected regardless of context. If K is
+   empty, the existing placement-empty requirement applies as before
+   (PLACEMENT_NOT_YET_SUPPORTED for a wrongly-supplied non-empty
+   value). If K is non-empty, the move needs real placement support
+   the reducer doesn't have yet (PR 5's containment update is still
+   restricted to K = ∅ splits) — rejected with the new, more precise
+   NONEMPTY_K_NOT_YET_SUPPORTED, distinguishing "your placement data
+   is malformed" from "this position itself isn't supported yet".
+   Merge moves have no K concept; placement must always be empty for
+   them, unconditionally, same as before.
 
-   This check is a genuine, provable SPECIAL CASE of PR 7's eventual
-   general region-legality machinery ("do these two corners border
-   the same region"), pulled forward because it's simple to prove
-   and because leaving it unchecked let the reducer silently process
-   a mathematically meaningless containment update. PR 7 should
-   generalize or absorb this check, not duplicate it independently.
-
-   Scope: this check runs ONLY when both corners are explicitly
-   present (the v2 Move shape). Legacy (cornerless) moves use an
-   IMPLIED corner in the reducer (an arbitrary convention, not
-   necessarily faithful to a v1 game's actual history) — retroactively
-   rejecting old-convention replays here would compound spec open
-   question O-Q1's already-flagged ambiguity rather than resolve it.
-   This residual gap for legacy replay is tied to O-Q1, not a new,
-   uncontained risk.
+   Scope: both new checks run ONLY when both corners are explicitly
+   present (the v2 Move shape) and in range — same O-Q1-tied gating
+   PR 5b established: legacy (cornerless) moves use an IMPLIED corner
+   in the reducer, not necessarily faithful to a v1 game's actual
+   history, so checking them here would compound O-Q1's already-
+   flagged ambiguity rather than resolve it.
 
    Future rules (added here as the engine grows)
    ─────────────────────────────────────────────
    hasLegalMoves(state) — v1.0, game-over detection.
-   validateMove will grow additional (general) region-legality checks
-   at v0.9.3 (PR 7) — its signature and return shape stay the same.
 
    These functions are pure: no DOM, no imports, no side effects.
    The same rules module can be used by the browser, bots, AI,
@@ -75,6 +69,8 @@
    ================================================================ */
 
 import { traceFaces, getComponents, cornerFace } from './faces.js';
+import { computeK } from './containment.js';
+import { areDotsInSameRegion } from './regions.js';
 
 /**
  * Returns the player (0 or 1) who makes the move at the given index.
@@ -108,7 +104,8 @@ export const RuleError = {
   END_CORNER_OUT_OF_RANGE:       'END_CORNER_OUT_OF_RANGE',
   INCONSISTENT_CORNER_DATA:      'INCONSISTENT_CORNER_DATA',
   PLACEMENT_NOT_YET_SUPPORTED:   'PLACEMENT_NOT_YET_SUPPORTED',
-  SAME_COMPONENT_DIFFERENT_FACE: 'SAME_COMPONENT_DIFFERENT_FACE',
+  DIFFERENT_REGIONS:             'DIFFERENT_REGIONS',
+  NONEMPTY_K_NOT_YET_SUPPORTED:  'NONEMPTY_K_NOT_YET_SUPPORTED',
 };
 
 /**
@@ -145,11 +142,6 @@ function cornerCount(degree) {
 /**
  * Validates a move against the current engine state.
  * Pure function — no mutation, no side effects.
- *
- * v0.8 scope: existence and lives. v0.9.2 PR 4 scope: corner bounds
- * and placement presence. v0.9.2 PR 5b scope: same-component/
- * different-face rejection (see file header). General region
- * legality remains v0.9.3's (PR 7's) job.
  *
  * Collects ALL applicable violations rather than stopping at the
  * first, so a single call tells the caller everything wrong with a
@@ -244,34 +236,51 @@ export function validateMove(state, move) {
     }
   }
 
-  // Same-component/different-face — see file header (PR 5b). Only
-  // meaningful once both corners are present AND in range; anything
-  // else already has its own violation above and comparing garbage
-  // indices would be meaningless.
-  if (hasStartCorner && hasEndCorner && startCornerInRange && endCornerInRange) {
-    const dotIds = state.dots.map(d => d.id);
-    const components = getComponents(state.edges, dotIds);
-    const componentOf = new Map();
-    components.forEach(members => members.forEach(id => componentOf.set(id, members[0])));
+  // Region legality (spec S7.3) and, for splits, real K (I-8) — see
+  // file header. Only meaningful once both corners are present AND
+  // in range; anything else already has its own violation above and
+  // comparing garbage indices would be meaningless.
+  let placementRequiredEmpty = true; // default: merges, and anything not reached below
 
-    if (componentOf.get(startDotId) === componentOf.get(endDotId)) {
+  if (hasStartCorner && hasEndCorner && startCornerInRange && endCornerInRange) {
+    const sameRegion = areDotsInSameRegion(state, startDotId, endDotId, startCorner, endCorner);
+
+    if (!sameRegion) {
+      violations.push({ rule: RuleError.DIFFERENT_REGIONS, dotId: startDotId });
+      // placementRequiredEmpty stays true — the baseline "must be
+      // empty for now" rule is still meaningful to check even when
+      // the move is already illegal for a different reason (this
+      // function collects ALL applicable violations, not just one).
+    } else {
       const faces = traceFaces(state.edges, state.rotations);
       const startFace = cornerFace(state.edges, state.rotations, faces, startDotId, startCorner);
       const endFace    = cornerFace(state.edges, state.rotations, faces, endDotId, endCorner);
-      if (startFace !== endFace) {
-        violations.push({ rule: RuleError.SAME_COMPONENT_DIFFERENT_FACE, dotId: startDotId });
+      const isSplit = startFace === endFace;
+
+      if (isSplit) {
+        const dotIds = state.dots.map(d => d.id);
+        const components = getComponents(state.edges, dotIds);
+        const touchedComponent = components.find(members => members.includes(startDotId));
+        const K = computeK(faces, state.parentAnchor, startFace, touchedComponent[0]);
+
+        if (K.length > 0) {
+          violations.push({ rule: RuleError.NONEMPTY_K_NOT_YET_SUPPORTED, dotId: startDotId });
+          placementRequiredEmpty = false; // can't yet validate a real placement either way
+        }
       }
+      // else: merge — placementRequiredEmpty stays true, no K concept applies.
     }
   }
 
-  // Placement (spec's π): temporarily required to be empty — see
-  // file header. A non-null, non-empty value can't yet be checked
-  // against real containment (PR 5), so it's rejected rather than
-  // silently ignored.
+  // Placement (spec's π): required to be empty whenever
+  // placementRequiredEmpty is still true (the default, and every
+  // K = ∅ / merge case above) — see file header. A non-null,
+  // non-empty value can't yet be checked meaningfully, so it's
+  // rejected rather than silently ignored.
   const placementIsEmpty =
     placement === null || placement === undefined ||
     (typeof placement === 'object' && Object.keys(placement).length === 0);
-  if (!placementIsEmpty) {
+  if (placementRequiredEmpty && !placementIsEmpty) {
     violations.push({ rule: RuleError.PLACEMENT_NOT_YET_SUPPORTED, dotId: startDotId });
   }
 

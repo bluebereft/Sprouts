@@ -464,8 +464,8 @@ PR 5b implementation review). **Note for PR 7:** this check is a
 provable special case of PR 7's eventual general region-legality
 machinery; PR 7 should generalize or absorb it, not duplicate it.
 
-**PR 6 — cutover (Stage D; version → v0.9.2).** ✅ **IMPLEMENTATION
-COMPLETE, not yet committed.** Objective: queries
+**PR 6 — cutover (Stage D; version → v0.9.2).** ✅ **COMPLETE** —
+merged to `main` (commit `5fe7545`). Objective: queries
 re-target the derived view; stored arrays, counters,
 `DOT_BOUNDARY_COUNT_WRONG`, and the old checker deleted; F1's
 null-for-sprouts bug ceases to exist. Files: `regions.js` (bodies) —
@@ -507,11 +507,48 @@ fixture — same pattern as PR 5b's caught error, worth noting twice
 now as a real, recurring benefit of writing out traces in test
 comments rather than just asserting expected values.
 
-**PR 7 — region-aware legality (v0.9.3).** Objective: `validateMove`
+**PR 7 — region-aware legality (v0.9.3).** ✅ **IMPLEMENTATION
+COMPLETE, not yet committed.** Objective: `validateMove`
 gains `DIFFERENT_REGIONS` + π-domain exactness (I-8); UI message map
-entry. Files: `rules.js`, `ui.js`, `rules.test.js`. Tests: same-region
-acceptance, cross-region rejection, π-domain violations. Invariants
-after: the engine enforces what only geometry enforced before.
+entry. Files: `rules.js` (main logic), `regions.js` (`areDotsInSameRegion`
+extended with optional explicit-corner parameters, default 0,
+preserving `ui.js`'s existing call contract exactly), `ui.js`
+(one `VIOLATION_MESSAGES` entry), `rules.test.js`.
+
+**Absorbs PR 5b's `SAME_COMPONENT_DIFFERENT_FACE` entirely** — removed,
+not kept alongside `DIFFERENT_REGIONS`, per that check's own
+forward note. A design-step finding caught before any code was
+written: `areDotsInSameRegion`'s `a === b` short-circuit would have
+silently broken self-loop moves with genuinely different corners
+landing on different faces (exactly PR 5b's scenario) — fixed to
+`a === b && cornerA === cornerB` before implementation began.
+
+I-8 is now real, not just re-asserted: for a classified split, K
+(the region's actual occupants, excluding the touched component) is
+computed via `containment.js`'s `computeK` — K = ∅ falls through to
+the existing placement-empty rule; K non-empty is rejected with the
+new, more precise `NONEMPTY_K_NOT_YET_SUPPORTED` (distinguishing
+"malformed placement" from "this position needs support the reducer
+doesn't have yet" — PR 5's restriction to K = ∅ splits still stands).
+Merge moves keep requiring placement empty, unconditionally, no K
+concept applies to them.
+
+**Third consecutive PR (5b, 6, 7) where a hand-traced corner→face
+assumption was wrong on first attempt and caught before merge, not
+after** — this time twice in one PR: several PR 4/5b-era test
+fixtures needed reconstructing with genuinely consistent topology
+(not just added containment fields) once region-checking required
+real structure; and a new test's own assumption (a single vertex's
+two corners both landing on the same face) was wrong, caught by the
+assertion failing rather than by inspection, fixed using two
+different vertices' corner-0s instead. Recorded as a real, recurring
+pattern this project's write-out-the-trace discipline keeps catching,
+not three unrelated incidents.
+
+**Honest scope note:** these checks are correct and tested but not
+yet reachable from real gameplay — `ui.js` still only constructs
+legacy (cornerless) moves; browser wiring for real corners remains
+PR 4's still-standing deferred scope decision. 169/169 tests passing.
 
 **PR 8 — Game Record formatVersion 2 (v0.9.4; gated on O-Q1).**
 Objective: serialize corners + placement per spec §7.5; apply the

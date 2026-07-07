@@ -56,6 +56,7 @@ import * as DrawInteraction from './drawInteraction.js';
 const VIOLATION_MESSAGES = {
   [RuleError.DOT_NOT_FOUND]:      'That dot no longer exists.',
   [RuleError.INSUFFICIENT_LIVES]: 'Not enough lives for that move.',
+  [RuleError.DIFFERENT_REGIONS]:  'Those dots are not in the same region.',
 };
 
 const UI = (() => {

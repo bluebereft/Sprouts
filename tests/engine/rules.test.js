@@ -148,10 +148,17 @@ test('validateMove: a fully-legal normal move has zero violations', () => {
 // ── validateMove: corner and placement checks — v0.9.2 PR 4 ──────
 
 test('validateMove: accepts valid in-range corners for both endpoints', () => {
+  // Real, consistent topology (not disconnected hand-picked darts):
+  // dot0 connects to dots 2,3 (degree 2, a tree); dot1 connects to
+  // dot4 separately (degree 1, its own tree). Two never-connected
+  // ROOT components — per regions.test.js's finding, they already
+  // share the plane's one outer region, so this move is legal.
   const state = {
-    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
-    edges: [],
-    rotations: [[0, 2], [4]], // dot0 degree 2 (valid corners 0-1), dot1 degree 1 (valid corner 0)
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }, { id: 2, lives: 3 }, { id: 3, lives: 3 }, { id: 4, lives: 3 }],
+    edges: [{ a: 0, b: 2 }, { a: 0, b: 3 }, { a: 1, b: 4 }],
+    rotations: [[0, 2], [4], [1], [3], [5]], // dot0 degree 2 (valid corners 0-1), dot1 degree 1 (valid corner 0)
+    outerFaceAnchor: { 0: { kind: 'dart', value: 0 }, 1: { kind: 'dart', value: 4 } },
+    parentAnchor: { 0: null, 1: null },
   };
   const result = validateMove(state, {
     startDotId: 0, endDotId: 1, regionId: 0, startCorner: 1, endCorner: 0, placement: null,
@@ -192,6 +199,8 @@ test('validateMove: degree-0 vertex accepts corner index 0 only', () => {
     dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
     edges: [],
     rotations: [[], []],
+    outerFaceAnchor: { 0: { kind: 'vertex', value: 0 }, 1: { kind: 'vertex', value: 1 } },
+    parentAnchor: { 0: null, 1: null },
   };
   const okResult = validateMove(state, {
     startDotId: 0, endDotId: 1, regionId: 0, startCorner: 0, endCorner: 0, placement: null,
@@ -238,6 +247,8 @@ test('validateMove: self-loop checks endCorner against the same vertex\'s rotati
     dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }, { id: 2, lives: 3 }, { id: 3, lives: 3 }],
     edges: [{ a: 0, b: 1 }, { a: 0, b: 2 }, { a: 0, b: 3 }],
     rotations: [[0, 2, 4], [1], [3], [5]], // degree 3, valid corners 0-2
+    outerFaceAnchor: { 0: { kind: 'dart', value: 0 } },
+    parentAnchor: { 0: null },
   };
   const okResult = validateMove(state, {
     startDotId: 0, endDotId: 0, regionId: 0, startCorner: 0, endCorner: 2, placement: null,
@@ -290,8 +301,10 @@ test('validateMove: accepts null placement and empty-object placement equally', 
 //
 // See rules.js's file header for the proof: two different faces of
 // the SAME component always host two different regions (spec D4),
-// so connecting them is always illegal, unconditionally — not
-// dependent on PR 5's restricted containment scope.
+// so connecting them is always illegal, unconditionally. This was
+// PR 5b's SAME_COMPONENT_DIFFERENT_FACE check; PR 7 absorbs it into
+// the general DIFFERENT_REGIONS check (regions.js's
+// areDotsInSameRegion) rather than keeping both.
 
 test('validateMove: rejects a chord connecting two DIFFERENT faces of the same component (the exact case that broke P-O2)', () => {
   // Self-loop bigon (dot 0, sprout 1) — 2 faces, per faces.test.js's
@@ -302,22 +315,28 @@ test('validateMove: rejects a chord connecting two DIFFERENT faces of the same c
     dots: [{ id: 0, lives: 1 }, { id: 1, lives: 1 }],
     edges: [{ a: 0, b: 1 }, { a: 0, b: 1 }],
     rotations: [[0, 2], [1, 3]],
+    outerFaceAnchor: { 0: { kind: 'dart', value: 0 } },
+    parentAnchor: { 0: null },
   };
   const result = validateMove(state, {
     startDotId: 0, endDotId: 1, regionId: 0, startCorner: 1, endCorner: 1, placement: null,
   });
   assert.equal(result.ok, false);
-  assert.ok(result.violations.some(v => v.rule === RuleError.SAME_COMPONENT_DIFFERENT_FACE));
+  assert.ok(result.violations.some(v => v.rule === RuleError.DIFFERENT_REGIONS));
 });
 
 test('validateMove: accepts a chord connecting the SAME face of one component (a genuine split, not rejected)', () => {
   // Same bigon. cornerFace(0, 0) -> alpha(0)=1 -> face B ({1,2}).
   // cornerFace(1, 1) -> alpha(3)=2 -> face B ({1,2}) too — genuinely
-  // the same face, a legitimate same-face split.
+  // the same face, a legitimate same-face split. Nothing else
+  // occupies anything here, so K is empty and the move is fully
+  // legal (region-match AND K = empty AND placement = null).
   const state = {
     dots: [{ id: 0, lives: 1 }, { id: 1, lives: 1 }],
     edges: [{ a: 0, b: 1 }, { a: 0, b: 1 }],
     rotations: [[0, 2], [1, 3]],
+    outerFaceAnchor: { 0: { kind: 'dart', value: 0 } },
+    parentAnchor: { 0: null },
   };
   const result = validateMove(state, {
     startDotId: 0, endDotId: 1, regionId: 0, startCorner: 0, endCorner: 1, placement: null,
@@ -325,16 +344,18 @@ test('validateMove: accepts a chord connecting the SAME face of one component (a
   assert.equal(result.ok, true);
 });
 
-test('validateMove: does not apply the same-component/different-face check to legacy (cornerless) moves', () => {
+test('validateMove: does not apply the region check to legacy (cornerless) moves', () => {
   // Documented residual gap, tied to spec open question O-Q1 (see
-  // rules.js file header) — legacy moves are NOT checked here.
+  // rules.js file header) — legacy moves are NOT checked here. No
+  // corners supplied means the whole region-check block is skipped,
+  // so this fixture doesn't even need parentAnchor/outerFaceAnchor.
   const state = {
     dots: [{ id: 0, lives: 1 }, { id: 1, lives: 1 }],
     edges: [{ a: 0, b: 1 }, { a: 0, b: 1 }],
     rotations: [[0, 2], [1, 3]],
   };
   const result = validateMove(state, { startDotId: 0, endDotId: 1, regionId: 0 });
-  assert.ok(!result.violations.some(v => v.rule === RuleError.SAME_COMPONENT_DIFFERENT_FACE));
+  assert.ok(!result.violations.some(v => v.rule === RuleError.DIFFERENT_REGIONS));
 });
 
 test('validateMove: accepts a merge between two different (root) components — unaffected by the new check', () => {
@@ -342,9 +363,40 @@ test('validateMove: accepts a merge between two different (root) components — 
     dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
     edges: [],
     rotations: [[], []],
+    outerFaceAnchor: { 0: { kind: 'vertex', value: 0 }, 1: { kind: 'vertex', value: 1 } },
+    parentAnchor: { 0: null, 1: null },
   };
   const result = validateMove(state, {
     startDotId: 0, endDotId: 1, regionId: 0, startCorner: 0, endCorner: 0, placement: null,
   });
   assert.equal(result.ok, true);
+});
+
+// ── validateMove: I-8, real K — v0.9.3 PR 7 ───────────────────────
+
+test('validateMove: rejects a split whose region has real occupants (NONEMPTY_K_NOT_YET_SUPPORTED)', () => {
+  // Triangle (dots 1,2,3) with an occupant (dot 0) inside face A
+  // ({0,2,4}) — same hand-built fixture shape as regions.test.js's
+  // occupant test. Vertex 2's corner-0 (dart1 -> alpha=0 -> face A)
+  // and vertex 3's corner-0 (dart3 -> alpha=2 -> face A) are BOTH
+  // independently verified on face A — a genuine same-face split of
+  // the occupied face. (Vertex 2's corner-1 is actually on face B,
+  // not face A — a second hand-trace error caught by this test
+  // failing on the first attempt, not by inspection; fixed by using
+  // two different vertices' corner-0s instead of one vertex's two
+  // corners.)
+  const edges = [{ a: 1, b: 2 }, { a: 2, b: 3 }, { a: 3, b: 1 }];
+  const rotations = [[], [0, 5], [1, 2], [3, 4]];
+  const state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 1 }, { id: 2, lives: 1 }, { id: 3, lives: 1 }],
+    edges,
+    rotations,
+    outerFaceAnchor: { 0: { kind: 'vertex', value: 0 }, 1: { kind: 'dart', value: 1 } },
+    parentAnchor: { 0: 0, 1: null }, // dot 0 occupies face A (dart 0's face)
+  };
+  const result = validateMove(state, {
+    startDotId: 2, endDotId: 3, regionId: 0, startCorner: 0, endCorner: 0, placement: null,
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.violations.some(v => v.rule === RuleError.NONEMPTY_K_NOT_YET_SUPPORTED));
 });

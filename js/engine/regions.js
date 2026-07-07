@@ -164,17 +164,27 @@ export function getRegionForDot(state, dotId) {
 }
 
 /**
- * Returns true if two dots' corner-0s currently belong to the same
- * region. NOT simple face equality — see file header, finding (2).
- * A dot trivially shares a region with itself.
+ * Returns true if two corners currently belong to the same region.
+ * NOT simple face equality — see file header, finding (2). Defaults
+ * to each dot's corner-0 (the convention finding (3) documents) when
+ * cornerA/cornerB are omitted, preserving the original 2-dot-id
+ * contract for existing callers (ui.js and pre-PR-7 tests).
+ *
+ * A corner trivially shares a region with itself — but note this
+ * requires BOTH the same dot AND the same corner: a self-loop move
+ * has a === b (same vertex) while using two DIFFERENT corners, which
+ * can genuinely land on different faces (PR 5b's finding) and must
+ * NOT be short-circuited to true just because the vertex matches.
  *
  * @param {object} state
  * @param {number} a
  * @param {number} b
+ * @param {number} [cornerA=0]
+ * @param {number} [cornerB=0]
  * @returns {boolean}
  */
-export function areDotsInSameRegion(state, a, b) {
-  if (a === b) return true;
+export function areDotsInSameRegion(state, a, b, cornerA = 0, cornerB = 0) {
+  if (a === b && cornerA === cornerB) return true;
   if (!state.dots.some(d => d.id === a) || !state.dots.some(d => d.id === b)) return false;
 
   const faces = traceFaces(state.edges, state.rotations);
@@ -186,8 +196,8 @@ export function areDotsInSameRegion(state, a, b) {
   const compA = repOf.get(a);
   const compB = repOf.get(b);
 
-  const faceA = cornerFace(state.edges, state.rotations, faces, a, 0);
-  const faceB = cornerFace(state.edges, state.rotations, faces, b, 0);
+  const faceA = cornerFace(state.edges, state.rotations, faces, a, cornerA);
+  const faceB = cornerFace(state.edges, state.rotations, faces, b, cornerB);
   if (faceA === faceB) return true;
 
   const outerA = resolveOuterFaceAnchor(faces, state.outerFaceAnchor[compA]);
