@@ -484,15 +484,21 @@ implementation review (arXiv:2108.07671 including its appendix):
 
 ## 12. Open questions
 
-- **O-Q1 — formatVersion 1 replay semantics.** Existing v1 Game
-  Records store Moves as `{startDotId, endDotId, regionId}` with no
-  corner data. Under this model such a Move is ambiguous whenever an
-  endpoint has degree 2 (two corners). Options: define a
-  deterministic default corner for v1 replay (every v1 record then
-  replays to *some* consistent embedding), or reject v1 records once
-  the topological model is live. Decision needed at the v0.9.2/v0.9.3
-  boundary; tech lead call. Until decided, v1 import behaviour is
-  unspecified.
+- **O-Q1 — formatVersion 1 replay semantics. RESOLVED (Jared, product
+  ruling, July 2026).** Existing v1 Game Records store Moves as
+  `{startDotId, endDotId, regionId}` with no corner data, making
+  replay ambiguous whenever an endpoint has degree ≥ 2 under this
+  model. Ruling: **v1 records are dropped entirely — no migration,
+  no backward-compatible replay path is built.** `gameRecord.js`'s
+  formatVersion gate is retired to formatVersion 2 only; anything
+  else (including v1) is rejected the same way an invalid version is
+  already rejected today. This removes the ambiguity rather than
+  resolving it — there is no v1 data left to be ambiguous about.
+  Consequence for PR 8: no "default corner" fallback path needs to
+  be designed or built for import; the reducer's legacy (cornerless,
+  append-only) code path likewise has no remaining caller once v1
+  import is gone, and its removal is a related question for PR 8's
+  design step (see `docs/migration-plan.md`'s PR 8 entry).
 
 No other open questions block v0.9.2. Previously open and now closed:
 lands (derived, D8); canonicalisation independence (this

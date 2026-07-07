@@ -507,8 +507,8 @@ fixture — same pattern as PR 5b's caught error, worth noting twice
 now as a real, recurring benefit of writing out traces in test
 comments rather than just asserting expected values.
 
-**PR 7 — region-aware legality (v0.9.3).** ✅ **IMPLEMENTATION
-COMPLETE, not yet committed.** Objective: `validateMove`
+**PR 7 — region-aware legality (v0.9.3).** ✅ **COMPLETE** —
+merged to `main` (commit `c70d472`). Objective: `validateMove`
 gains `DIFFERENT_REGIONS` + π-domain exactness (I-8); UI message map
 entry. Files: `rules.js` (main logic), `regions.js` (`areDotsInSameRegion`
 extended with optional explicit-corner parameters, default 0,
@@ -553,11 +553,30 @@ PR 4's still-standing deferred scope decision. 169/169 tests passing.
 **PR 8 — Game Record formatVersion 2 (v0.9.4; gated on O-Q1).**
 Objective: serialize corners + placement per spec §7.5; apply the
 O-Q1 ruling to v1 imports; retire `regionId` from Move; discharge
-P-O5 (round-trip under replay). Files: `gameRecord.js`, `move.js`,
-`gameRecordUI.js` (message for rejected-version case if O-Q1 says
-reject), tests. Invariants after: v2 round-trips exactly; v1
-behaviour matches the ruling; `regionId` gone via stale-reference
-sweep.
+P-O5 (round-trip under replay).
+
+**O-Q1 ruling (Jared, product decision): v1 records are dropped
+entirely.** No migration path, no default-corner fallback, no
+backward-compatible replay is built. `gameRecord.js`'s formatVersion
+gate moves to requiring formatVersion 2 only; anything else
+(including v1) is rejected the same way an invalid version already
+is today — this is a simplification of the gate, not new rejection
+logic. This removes O-Q1's ambiguity rather than resolving it: there
+is no old data left to be ambiguous about.
+
+**Consequence to settle at PR 8's design step, not assumed here:**
+with v1 import gone, the reducer's legacy (cornerless, append-only
+σ-insertion) code path in `reducer.js` — built at PR 2, kept through
+PR 4–7 specifically to support v1 replay — has no remaining caller.
+Whether to remove it (dead-code elimination, simplifying `reducer.js`
+back toward a single code path) or keep it (e.g. as a convenience for
+constructing moves without computing corners, in tests or future
+bots) is a real design choice for PR 8, not a foregone conclusion —
+flagged here so it isn't decided by default.
+
+Files: `gameRecord.js`, `move.js` (retire `regionId`), `reducer.js`
+(pending the legacy-path decision above), tests. Invariants after:
+v2 round-trips exactly; `regionId` gone via stale-reference sweep.
 
 Every PR: compiles, all tests green, no observable behaviour change
 until PR 6 (which changes only what was already wrong — F1) and PR 7
@@ -580,15 +599,16 @@ until PR 6 (which changes only what was already wrong — F1) and PR 7
     │                               discharges P-O2, P-O4
   PR 6 (cutover, version bump)
     │           │
-  PR 7 (legality)   PR 8 (record v2) ◄── GATE: O-Q1 ruling
+  PR 7 (legality)   PR 8 (record v2) ◄── O-Q1: RESOLVED (drop v1)
                     needs 4 + 6; independent of 7 (7-first is
                     a product choice); discharges P-O5
 ```
 
-Critical path: 1→2→3→4→5→6 (PRs 7 and 8 fork after 6). Only
-external gate: the O-Q1 ruling, needed before PR 8 — five PRs of
-schedule slack. Only useful parallelization: PR 3 alongside PR 2
-once the σ representation is written down; with one implementer,
+Critical path: 1→2→3→4→5→6 (PRs 7 and 8 fork after 6). External
+gate resolved: O-Q1 ruled (drop v1 records entirely, no migration
+path) — PR 8 now unblocked. Only useful parallelization: PR 3
+alongside PR 2 once the σ representation is written down; with one
+implementer,
 serial order is simpler and preferred.
 
 ### PR 1 API note (adopted at design review)
