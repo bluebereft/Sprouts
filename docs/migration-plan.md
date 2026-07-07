@@ -436,8 +436,8 @@ in real computed K (distinguishing "K happens to be nonempty" from
 justified yet. `rules.js` is unchanged from PR 4 in this PR.
 
 **PR 5b — same-component/different-face legality (inserted between
-PR 5 and PR 6).** ✅ **IMPLEMENTATION COMPLETE, not yet committed.**
-Objective: close the open risk above. **Reframe, not a patch:**
+PR 5 and PR 6).** ✅ **COMPLETE** — merged to `main` (commit
+`a58d5e0`). Objective: close the open risk above. **Reframe, not a patch:**
 working the case through spec D4 + §7.3 gives a general proof —
 region identity is a function of (host component, host face); two
 distinct faces of the same component always host two distinct
