@@ -1,5 +1,5 @@
  /* ================================================================
-   rules.js — Sprouts Engine Rules (v0.9.2 — PR 4)
+   rules.js — Sprouts Engine Rules (v0.9.2 — PR 5b)
 
    Responsibility
    ──────────────
@@ -20,30 +20,61 @@
    ────────────────────────────────────────────
    validateMove gained checks for the v2 Move shape's startCorner/
    endCorner/placement fields (move.js). These check bounds and
-   presence only — NOT region/topological legality ("do these two
-   corners actually share a region"), which needs containment (spec
-   §3) and is deferred to v0.9.3 (PR 7), consistent with the existing
-   plan: this file's v0.8 scope note already said crossings/regions
-   are added later, not now.
+   presence only — general region/topological legality remains
+   v0.9.3's (PR 7's) job.
 
    placement is temporarily REQUIRED to be null/empty for every move
    validated by this version — containment doesn't exist until PR 5,
    so there's nothing to check a non-empty placement against yet.
    This is a deliberate, temporary restriction (PLACEMENT_NOT_YET_
-   SUPPORTED), not a permanent rule; PR 5 relaxes it once real K is
-   computable.
+   SUPPORTED), not a permanent rule.
+
+   v0.9.2 PR 5b — same-component, different-face is ALWAYS illegal
+   ───────────────────────────────────────────────────────────────────
+   Found by PR 5's own exhaustive test (P-O2): a move whose two
+   corners belong to the SAME component but land on DIFFERENT faces
+   of it is illegal, unconditionally — not a restricted-scope gap,
+   a general mathematical fact.
+
+   Proof: spec D4 defines region identity as a function of (host
+   component, host face) — each face of a component hosts exactly
+   one region, and two DISTINCT faces of the SAME component always
+   host two DISTINCT regions (there is no mechanism in D4 by which
+   two different faces of one component could resolve to the same
+   region). Spec §7.3 requires both corners of a legal Move to
+   border the SAME region. Two corners on different faces of the
+   same component therefore always border different regions, and
+   the move is always illegal. This holds in full generality — it is
+   NOT dependent on PR 5's restricted containment scope.
+
+   This check is a genuine, provable SPECIAL CASE of PR 7's eventual
+   general region-legality machinery ("do these two corners border
+   the same region"), pulled forward because it's simple to prove
+   and because leaving it unchecked let the reducer silently process
+   a mathematically meaningless containment update. PR 7 should
+   generalize or absorb this check, not duplicate it independently.
+
+   Scope: this check runs ONLY when both corners are explicitly
+   present (the v2 Move shape). Legacy (cornerless) moves use an
+   IMPLIED corner in the reducer (an arbitrary convention, not
+   necessarily faithful to a v1 game's actual history) — retroactively
+   rejecting old-convention replays here would compound spec open
+   question O-Q1's already-flagged ambiguity rather than resolve it.
+   This residual gap for legacy replay is tied to O-Q1, not a new,
+   uncontained risk.
 
    Future rules (added here as the engine grows)
    ─────────────────────────────────────────────
    hasLegalMoves(state) — v1.0, game-over detection.
-   validateMove will grow additional checks at v0.9.3/v1.0 (crossings,
-   regions) — its signature and return shape stay the same; only the
-   body grows to push more entries into the violations array.
+   validateMove will grow additional (general) region-legality checks
+   at v0.9.3 (PR 7) — its signature and return shape stay the same.
 
    These functions are pure: no DOM, no imports, no side effects.
    The same rules module can be used by the browser, bots, AI,
    replay system, and command-line tools without modification.
    ================================================================ */
+
+import { traceFaces, getComponents, cornerFace } from './faces.js';
 
 /**
  * Returns the player (0 or 1) who makes the move at the given index.
@@ -71,12 +102,13 @@ export function playerForMove(moveIndex, startingPlayer = 0) {
  * and tests only ever need the code, never prose.
  */
 export const RuleError = {
-  DOT_NOT_FOUND:               'DOT_NOT_FOUND',
-  INSUFFICIENT_LIVES:          'INSUFFICIENT_LIVES',
-  START_CORNER_OUT_OF_RANGE:   'START_CORNER_OUT_OF_RANGE',
-  END_CORNER_OUT_OF_RANGE:     'END_CORNER_OUT_OF_RANGE',
-  INCONSISTENT_CORNER_DATA:    'INCONSISTENT_CORNER_DATA',
-  PLACEMENT_NOT_YET_SUPPORTED: 'PLACEMENT_NOT_YET_SUPPORTED',
+  DOT_NOT_FOUND:                 'DOT_NOT_FOUND',
+  INSUFFICIENT_LIVES:            'INSUFFICIENT_LIVES',
+  START_CORNER_OUT_OF_RANGE:     'START_CORNER_OUT_OF_RANGE',
+  END_CORNER_OUT_OF_RANGE:       'END_CORNER_OUT_OF_RANGE',
+  INCONSISTENT_CORNER_DATA:      'INCONSISTENT_CORNER_DATA',
+  PLACEMENT_NOT_YET_SUPPORTED:   'PLACEMENT_NOT_YET_SUPPORTED',
+  SAME_COMPONENT_DIFFERENT_FACE: 'SAME_COMPONENT_DIFFERENT_FACE',
 };
 
 /**
@@ -115,9 +147,9 @@ function cornerCount(degree) {
  * Pure function — no mutation, no side effects.
  *
  * v0.8 scope: existence and lives. v0.9.2 PR 4 scope: corner bounds
- * and placement presence (see file header). Region/topological
- * legality is deferred to v0.9.3 — this function will grow more
- * checks then, but its signature and return shape stay the same.
+ * and placement presence. v0.9.2 PR 5b scope: same-component/
+ * different-face rejection (see file header). General region
+ * legality remains v0.9.3's (PR 7's) job.
  *
  * Collects ALL applicable violations rather than stopping at the
  * first, so a single call tells the caller everything wrong with a
@@ -180,16 +212,23 @@ export function validateMove(state, move) {
   // that was actually found (a missing dot already has its own
   // violation above; state.rotations has no useful entry to check
   // against for an id that doesn't exist as a dot).
+  let startCornerInRange = false;
+  let endCornerInRange = false;
+
   if (hasStartCorner && startDot) {
     const count = cornerCount(state.rotations[startDotId].length);
     if (startCorner < 0 || startCorner >= count) {
       violations.push({ rule: RuleError.START_CORNER_OUT_OF_RANGE, dotId: startDotId });
+    } else {
+      startCornerInRange = true;
     }
   }
   if (hasEndCorner && endDot && !isLoop) {
     const count = cornerCount(state.rotations[endDotId].length);
     if (endCorner < 0 || endCorner >= count) {
       violations.push({ rule: RuleError.END_CORNER_OUT_OF_RANGE, dotId: endDotId });
+    } else {
+      endCornerInRange = true;
     }
   }
   // Self-loop: both corners target the SAME vertex's SAME (current,
@@ -200,6 +239,28 @@ export function validateMove(state, move) {
     const count = cornerCount(state.rotations[startDotId].length);
     if (endCorner < 0 || endCorner >= count) {
       violations.push({ rule: RuleError.END_CORNER_OUT_OF_RANGE, dotId: endDotId });
+    } else {
+      endCornerInRange = true;
+    }
+  }
+
+  // Same-component/different-face — see file header (PR 5b). Only
+  // meaningful once both corners are present AND in range; anything
+  // else already has its own violation above and comparing garbage
+  // indices would be meaningless.
+  if (hasStartCorner && hasEndCorner && startCornerInRange && endCornerInRange) {
+    const dotIds = state.dots.map(d => d.id);
+    const components = getComponents(state.edges, dotIds);
+    const componentOf = new Map();
+    components.forEach(members => members.forEach(id => componentOf.set(id, members[0])));
+
+    if (componentOf.get(startDotId) === componentOf.get(endDotId)) {
+      const faces = traceFaces(state.edges, state.rotations);
+      const startFace = cornerFace(state.edges, state.rotations, faces, startDotId, startCorner);
+      const endFace    = cornerFace(state.edges, state.rotations, faces, endDotId, endCorner);
+      if (startFace !== endFace) {
+        violations.push({ rule: RuleError.SAME_COMPONENT_DIFFERENT_FACE, dotId: startDotId });
+      }
     }
   }
 

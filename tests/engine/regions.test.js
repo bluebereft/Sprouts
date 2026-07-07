@@ -408,9 +408,15 @@ test('checkInvariantsV2: propagates a containment violation (I-1) from checkCont
 // restricted universe ever becomes non-root — see containment.js's
 // file header for the closed-scope argument). EXCLUDED: connecting
 // two vertices already in the SAME component but potentially on
-// different faces of it — a case containment.js's own header now
-// names explicitly as unhandled, discovered by an earlier version of
-// this very test.
+// different faces of it — discovered by an earlier version of this
+// very test. Resolved at PR 5b: this case is proven ALWAYS illegal
+// (spec D4 + §7.3 — see rules.js's file header for the proof) and is
+// now rejected by validateMove() whenever real corners are used
+// (rules.test.js's SAME_COMPONENT_DIFFERENT_FACE tests). It remains
+// excluded from THIS generator because allLegalMoves() here builds
+// legacy (cornerless) moves, which validateMove does not check for
+// this — a deliberate, documented residual gap tied to spec open
+// question O-Q1, not a re-opening of the original finding.
 
 function allLegalMoves(state) {
   const moves = [];

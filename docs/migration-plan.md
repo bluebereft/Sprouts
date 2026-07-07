@@ -423,21 +423,9 @@ produce roots, K=∅ splits never create an occupant — so nothing in
 this universe ever becomes non-root. The restriction is the *entire*
 reachable state space, not a narrow slice of it, with one exception:
 
-**🚩 OPEN RISK, found by PR 5's own exhaustive test, must be resolved
-before browser wiring / real gameplay ships:** connecting two
-vertices *already in the same component* (a chord — e.g. closing a
-loop between two existing dots, not drawing a fresh self-loop) is
-neither a clean merge (only one component exists, not two) nor
-reliably a clean split (the two corners may be on different faces of
-that component) under the current classification. This is NOT a
-hypothetical edge case — chord moves are ordinary Sprouts play. The
-reducer currently produces a syntactically valid but mathematically
-meaningless containment update for this case, silently. Needs either
-(a) extending `containment.js`'s classification to handle it
-correctly, or (b) an explicit interim legality guard rejecting such
-moves until (a) lands. Documented in `containment.js`'s file header;
-tracked here so it can't get lost in a code comment. Blocks: any real
-two-player gameplay, not just a future PR's scope.
+**🚩 RESOLVED at PR 5b** (see below) — this was a legality gap, not a
+containment algorithm gap. `containment.js`/`reducer.js` were never
+wrong.
 
 **I-8 (π-domain exactness) deferred, walked back mid-implementation:**
 the original design proposed grounding `rules.js`'s placement check
@@ -446,6 +434,35 @@ in real computed K (distinguishing "K happens to be nonempty" from
 — observable accept/reject behaviour is identical either way
 (placement is rejected regardless), so the added complexity wasn't
 justified yet. `rules.js` is unchanged from PR 4 in this PR.
+
+**PR 5b — same-component/different-face legality (inserted between
+PR 5 and PR 6).** ✅ **IMPLEMENTATION COMPLETE, not yet committed.**
+Objective: close the open risk above. **Reframe, not a patch:**
+working the case through spec D4 + §7.3 gives a general proof —
+region identity is a function of (host component, host face); two
+distinct faces of the same component always host two distinct
+regions; §7.3 requires both corners of a legal Move to border the
+same region; therefore connecting two different faces of the same
+component is ALWAYS illegal, unconditionally, in full generality —
+not scoped to PR 5's restricted universe. This was a legality gap,
+not a containment gap: `containment.js` and `reducer.js` needed zero
+changes. Files: `rules.js` only (one check, one new violation code
+`SAME_COMPONENT_DIFFERENT_FACE`), plus two test files. Scope: the
+check runs only for v2 (real-corner) moves — legacy cornerless moves
+use an implied corner (an arbitrary convention, not necessarily
+faithful to a v1 game's history), so retroactively rejecting them
+here would compound spec open question O-Q1 rather than resolve it;
+this residual gap is tied to O-Q1, not new. Tests: the exact fixture
+that broke PR 5's P-O2 test, now correctly rejected; a genuine
+same-face split (correctly still accepted); legacy-move exemption
+confirmed explicit; cross-component merge confirmed unaffected.
+179/179 tests passing (175 prior + 4 new — 3 existing PR 4-era
+`rules.test.js` fixtures also needed fixing: two gained `edges: []`
+legitimately, one was rebuilt with genuine consistent topology after
+a hand-trace error was caught rather than papered over — see the
+PR 5b implementation review). **Note for PR 7:** this check is a
+provable special case of PR 7's eventual general region-legality
+machinery; PR 7 should generalize or absorb it, not duplicate it.
 
 **PR 6 — cutover (Stage D; version → v0.9.2).** Objective: queries
 re-target the derived view; stored arrays, counters,

@@ -150,6 +150,7 @@ test('validateMove: a fully-legal normal move has zero violations', () => {
 test('validateMove: accepts valid in-range corners for both endpoints', () => {
   const state = {
     dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
+    edges: [],
     rotations: [[0, 2], [4]], // dot0 degree 2 (valid corners 0-1), dot1 degree 1 (valid corner 0)
   };
   const result = validateMove(state, {
@@ -189,6 +190,7 @@ test('validateMove: rejects an out-of-range endCorner', () => {
 test('validateMove: degree-0 vertex accepts corner index 0 only', () => {
   const state = {
     dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
+    edges: [],
     rotations: [[], []],
   };
   const okResult = validateMove(state, {
@@ -226,9 +228,16 @@ test('validateMove: legacy shape (no corners at all) is still valid — no INCON
 });
 
 test('validateMove: self-loop checks endCorner against the same vertex\'s rotation independently of startCorner', () => {
+  // Real, consistent topology (not disconnected hand-picked darts):
+  // dot 0 is the center of a 3-edge star/tree to dots 1, 2, 3 (a
+  // tree has exactly one face, per faces.test.js's bridge case
+  // generalized — so corners 0 and 2 at dot 0 are genuinely on the
+  // SAME face, correctly passing PR 5b's same-component check
+  // rather than coincidentally comparing two nulls).
   const state = {
-    dots: [{ id: 0, lives: 3 }],
-    rotations: [[0, 2, 4]], // degree 3, valid corners 0-2
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }, { id: 2, lives: 3 }, { id: 3, lives: 3 }],
+    edges: [{ a: 0, b: 1 }, { a: 0, b: 2 }, { a: 0, b: 3 }],
+    rotations: [[0, 2, 4], [1], [3], [5]], // degree 3, valid corners 0-2
   };
   const okResult = validateMove(state, {
     startDotId: 0, endDotId: 0, regionId: 0, startCorner: 0, endCorner: 2, placement: null,
@@ -275,4 +284,67 @@ test('validateMove: accepts null placement and empty-object placement equally', 
   const emptyResult = validateMove(state, { startDotId: 0, endDotId: 1, regionId: 0, placement: {} });
   assert.equal(nullResult.ok, true);
   assert.equal(emptyResult.ok, true);
+});
+
+// ── validateMove: same-component/different-face — v0.9.2 PR 5b ───
+//
+// See rules.js's file header for the proof: two different faces of
+// the SAME component always host two different regions (spec D4),
+// so connecting them is always illegal, unconditionally — not
+// dependent on PR 5's restricted containment scope.
+
+test('validateMove: rejects a chord connecting two DIFFERENT faces of the same component (the exact case that broke P-O2)', () => {
+  // Self-loop bigon (dot 0, sprout 1) — 2 faces, per faces.test.js's
+  // hand-traced fixture: face A = darts [0,3], face B = darts [1,2].
+  // cornerFace(0, 1) -> alpha(2)=3 -> face A.
+  // cornerFace(1, 1) -> alpha(3)=2 -> face B. Different faces.
+  const state = {
+    dots: [{ id: 0, lives: 1 }, { id: 1, lives: 1 }],
+    edges: [{ a: 0, b: 1 }, { a: 0, b: 1 }],
+    rotations: [[0, 2], [1, 3]],
+  };
+  const result = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, startCorner: 1, endCorner: 1, placement: null,
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.violations.some(v => v.rule === RuleError.SAME_COMPONENT_DIFFERENT_FACE));
+});
+
+test('validateMove: accepts a chord connecting the SAME face of one component (a genuine split, not rejected)', () => {
+  // Same bigon. cornerFace(0, 0) -> alpha(0)=1 -> face B ({1,2}).
+  // cornerFace(1, 1) -> alpha(3)=2 -> face B ({1,2}) too — genuinely
+  // the same face, a legitimate same-face split.
+  const state = {
+    dots: [{ id: 0, lives: 1 }, { id: 1, lives: 1 }],
+    edges: [{ a: 0, b: 1 }, { a: 0, b: 1 }],
+    rotations: [[0, 2], [1, 3]],
+  };
+  const result = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, startCorner: 0, endCorner: 1, placement: null,
+  });
+  assert.equal(result.ok, true);
+});
+
+test('validateMove: does not apply the same-component/different-face check to legacy (cornerless) moves', () => {
+  // Documented residual gap, tied to spec open question O-Q1 (see
+  // rules.js file header) — legacy moves are NOT checked here.
+  const state = {
+    dots: [{ id: 0, lives: 1 }, { id: 1, lives: 1 }],
+    edges: [{ a: 0, b: 1 }, { a: 0, b: 1 }],
+    rotations: [[0, 2], [1, 3]],
+  };
+  const result = validateMove(state, { startDotId: 0, endDotId: 1, regionId: 0 });
+  assert.ok(!result.violations.some(v => v.rule === RuleError.SAME_COMPONENT_DIFFERENT_FACE));
+});
+
+test('validateMove: accepts a merge between two different (root) components — unaffected by the new check', () => {
+  const state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }],
+    edges: [],
+    rotations: [[], []],
+  };
+  const result = validateMove(state, {
+    startDotId: 0, endDotId: 1, regionId: 0, startCorner: 0, endCorner: 0, placement: null,
+  });
+  assert.equal(result.ok, true);
 });
