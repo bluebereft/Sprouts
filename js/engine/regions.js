@@ -1,5 +1,5 @@
 /* ================================================================
-   regions.js — Sprouts Engine Regions (v0.9.1)
+   regions.js — Sprouts Engine Regions (v0.9.2 — PR 6, cutover)
 
    Responsibility
    ──────────────
@@ -8,80 +8,88 @@
    belongs to, how regions and boundaries relate — using only graph
    structure. No coordinates, no geometry.
 
-   v0.9.1 — pure query functions, still no mutation
-   ─────────────────────────────────────────────────
-   Adds getBoundaryForDot, a REAL getRegionForDot (replacing the
-   stub), areDotsInSameRegion, areDotsOnSameBoundary,
-   getBoundariesForRegion, and checkInvariants — a structural
-   validity checker, returning the same { ok, violations } shape
-   validateMove() already established.
+   v0.9.2 PR 6 — cutover to the derived view
+   ────────────────────────────────────────────
+   The stored `regions`/`boundaries` arrays, `nextRegionId`/
+   `nextBoundaryId` counters, and the old `checkInvariants` (which
+   enforced the disproven "every dot in exactly one boundary"
+   invariant) are DELETED. Every query below now reads σ + faces +
+   containment (derived, via faces.js/containment.js) instead. This
+   also closes finding F1: the stored topology was stale after move 1
+   of every game (a sprout never joined any boundary) — the derived
+   view has no such staleness, since it's recomputed from the real
+   graph every time.
 
-   Still no mutation/splitting logic — that's v0.9.2. Still no
-   region-aware legality in validateMove() — that's v0.9.3.
+   Three findings from the cutover design review, recorded here
+   because they change what these functions mean, not just how they
+   compute it:
 
-   A scope note worth being explicit about: while designing this
-   file's tests, two hand-built "multi-region" fixtures turned out to
-   be invalid planar structures on inspection — isolated dots forming
-   two regions (wrong: isolated points enclose nothing, so they can't
-   be separate faces) and a triangle-plus-floating-dot fixture whose
-   declared F didn't satisfy Euler's formula once worked through by
-   hand. Both failures traced to the same unresolved question flagged
-   in design.md: whether every edge borders exactly two boundary-
-   sides, walked in opposite directions by each side's face. Rather
-   than encode an unverified guess about that convention into a test,
-   checkInvariants' Euler's-formula check is tested here only against
-   states already known correct (the seeded starting topology). Real
-   multi-region Euler coverage is deferred to v0.9.2, where it can be
-   checked against a state the splitting algorithm actually produces,
-   cross-validated against the literature once, rather than invented
-   by hand now.
+   (1) A "boundary" IS a face (spec D3). It needs a stable numeric id
+       for API compatibility even though nothing external depends on
+       the specific number (see below) — smallest dart in the face's
+       walk for non-trivial faces (already sorted first, spec §10.3),
+       or -(component + 1) for trivial (degree-0) faces, guaranteed
+       disjoint from real dart ids (always >= 0).
 
-   The five lookup functions below don't have this problem — they're
-   pure containment queries, correct for any structurally well-formed
-   input regardless of whether it represents a valid embedding, so
-   they're tested against simple hand-built fixtures without needing
-   that convention resolved first.
+   (2) Region and boundary collapse to the SAME identifier at the
+       single-corner level (a corner's region is always just that
+       corner's own face, unconditionally — no root/occupant special
+       casing needed), but checking whether TWO DIFFERENT dots share
+       a region does NOT collapse to face equality. Per spec D4,
+       region(f) = f's own walk plus the outer walks of everything
+       occupying f — so dot A and dot B can be on different faces and
+       still share a region, if one occupies the other's face (or
+       both are siblings occupying a common parent, including both
+       being roots, since all root components collectively share the
+       ONE plane's outer region). areDotsInSameRegion() implements
+       this properly; it is NOT simple equality, unlike the old
+       (pre-cutover) v0.9.1 implementation, which was only correct
+       because that model had no host/occupant hierarchy at all.
 
-   Depends on: js/engine/faces.js (getComponents, v0.9.2 PR 3) for
-   checkInvariants' Euler check. Otherwise pure functions of engine
-   state, no other dependencies.
+   (3) A dot of degree >= 2 has multiple corners, potentially on
+       different faces — "which region is this dot in," asked
+       without specifying a corner, is genuinely ambiguous (the same
+       finding that motivated Move needing corners at all). Since
+       getRegionForDot's only caller (ui.js) doesn't yet supply a
+       corner, and its result (Move.regionId) is not read for
+       correctness by anything (region-legality isn't checked until
+       PR 7), corner 0 is used as a documented, deterministic — but
+       arbitrary — convention, matching the precedent set by PR 3's
+       φ-direction choice and PR 4's default-corner insertion.
+
+   getBoundariesForRegion now returns FACE OBJECTS ({component,
+   darts}), not the old {id, vertices} shape — an honest
+   representation change; grep confirmed (PR 6 design step) that
+   nothing outside this file's own tests consumed the old shape.
+
+   Depends on: js/engine/faces.js (traceFaces, getComponents,
+   cornerFace), js/engine/containment.js (resolveOuterFaceAnchor,
+   resolveParentAnchor, computeK, checkContainmentInvariants).
    ================================================================ */
 
-import { getComponents, traceFaces } from './faces.js';
-import { checkContainmentInvariants } from './containment.js';
+import { getComponents, traceFaces, cornerFace } from './faces.js';
+import {
+  resolveOuterFaceAnchor,
+  resolveParentAnchor,
+  computeK,
+  checkContainmentInvariants,
+} from './containment.js';
 
 /**
- * Builds the starting topology for a fresh game: one region
- * containing one single-vertex boundary per dot, one empty rotation
- * per dot (v0.9.2 — every dot starts at degree 0, so its rotation
- * system entry is the empty array; see
- * docs/specifications/topological-model.md §2.3), and containment
- * (v0.9.2 PR 5) seeding every dot as its own root component: each
- * dot's outerFaceAnchor is its own trivial (isolated-vertex) face,
- * and its parentAnchor is null (⊥ — the plane's outer region).
+ * Builds the starting topology for a fresh game: one empty rotation
+ * per dot (every dot starts at degree 0 — spec §2.3), and containment
+ * seeding every dot as its own root component: each dot's
+ * outerFaceAnchor is its own trivial (isolated-vertex) face, and its
+ * parentAnchor is null (⊥ — the plane's outer region).
  *
  * @param {number} dotCount — number of starting dots
  * @returns {{
- *   regions: Array<{id: number, boundaries: number[]}>,
- *   boundaries: Array<{id: number, vertices: number[]}>,
- *   nextRegionId: number,
- *   nextBoundaryId: number,
  *   rotations: number[][],
  *   outerFaceAnchor: object,
  *   parentAnchor: object
  * }}
  */
 export function buildInitialTopology(dotCount) {
-  const boundaries = [];
-  for (let i = 0; i < dotCount; i++) {
-    boundaries.push({ id: i, vertices: [i] });
-  }
-
-  const region = {
-    id: 0,
-    boundaries: boundaries.map(b => b.id),
-  };
-
   const rotations = [];
   const outerFaceAnchor = {};
   const parentAnchor = {};
@@ -91,61 +99,74 @@ export function buildInitialTopology(dotCount) {
     parentAnchor[i] = null;
   }
 
-  return {
-    regions: [region],
-    boundaries,
-    nextRegionId: 1,
-    nextBoundaryId: dotCount,
-    rotations,
-    outerFaceAnchor,
-    parentAnchor,
-  };
+  return { rotations, outerFaceAnchor, parentAnchor };
+}
+
+// ── Boundary/region identifiers (derived-view id scheme) ─────────
+
+/**
+ * Deterministic numeric id for a face (= a boundary). See file
+ * header, finding (1).
+ *
+ * @param {{component:number, darts:number[]}} face
+ * @returns {number}
+ */
+function faceId(face) {
+  return face.darts.length > 0 ? face.darts[0] : -(face.component + 1);
+}
+
+/**
+ * Reverse lookup: the face with a given id, within a specific
+ * traceFaces() result.
+ *
+ * @param {Array<{component:number, darts:number[]}>} faces
+ * @param {number} id
+ * @returns {?{component:number, darts:number[]}}
+ */
+function findFaceById(faces, id) {
+  return faces.find(f => faceId(f) === id) ?? null;
 }
 
 // ── Query functions ─────────────────────────────────────────────
 
 /**
- * Returns the id of the boundary a dot currently belongs to.
+ * Returns the id of the boundary (face) a dot's corner-0 currently
+ * belongs to — see file header, finding (3), for the corner-0
+ * convention.
  *
  * @param {object} state — current engine state
  * @param {number} dotId
- * @returns {number|null} boundary id, or null if the dot isn't found
- *   in any boundary (should not happen for a well-formed state, but
- *   this function doesn't assume its input has already been validated)
+ * @returns {?number} boundary id, or null if the dot isn't found
  */
 export function getBoundaryForDot(state, dotId) {
-  const boundary = state.boundaries.find(b => b.vertices.includes(dotId));
-  return boundary ? boundary.id : null;
+  if (!state.dots.some(d => d.id === dotId)) return null;
+  const faces = traceFaces(state.edges, state.rotations);
+  const face = cornerFace(state.edges, state.rotations, faces, dotId, 0);
+  return face ? faceId(face) : null;
 }
 
 /**
- * Returns the id of the region a dot currently belongs to.
- *
- * v0.9.1: real implementation, replacing the v0.7/v0.9 stub that
- * always returned 0. The value it returns is unchanged for any state
- * that existed before this version (only one region has ever existed
- * so far), but it's now a genuine lookup rather than a hardcoded
- * answer — ready for v0.9.2 to give it something real to compute.
+ * Returns the id of the region a dot's corner-0 currently belongs
+ * to. See file header, finding (2) — at the single-corner level this
+ * IS the same identifier as getBoundaryForDot (a corner's region is
+ * always just that corner's own face) — the region/boundary
+ * distinction only matters when enumerating ALL of a region's
+ * boundaries (getBoundariesForRegion) or comparing two DIFFERENT
+ * dots (areDotsInSameRegion), neither of which is a single-corner
+ * lookup.
  *
  * @param {object} state — current engine state
  * @param {number} dotId
- * @returns {number|null} region id, or null if the dot isn't found
+ * @returns {?number} region id, or null if the dot isn't found
  */
 export function getRegionForDot(state, dotId) {
-  const boundaryId = getBoundaryForDot(state, dotId);
-  if (boundaryId === null) return null;
-
-  const region = state.regions.find(r => r.boundaries.includes(boundaryId));
-  return region ? region.id : null;
+  return getBoundaryForDot(state, dotId);
 }
 
 /**
- * Returns true if two dots currently belong to the same region.
- *
- * A dot trivially shares a region with itself — checked as an
- * explicit short-circuit rather than left to fall out of two equal
- * lookups, since this is also the correct handling of a self-loop
- * (both endpoints are the same dot).
+ * Returns true if two dots' corner-0s currently belong to the same
+ * region. NOT simple face equality — see file header, finding (2).
+ * A dot trivially shares a region with itself.
  *
  * @param {object} state
  * @param {number} a
@@ -154,18 +175,43 @@ export function getRegionForDot(state, dotId) {
  */
 export function areDotsInSameRegion(state, a, b) {
   if (a === b) return true;
-  const regionA = getRegionForDot(state, a);
-  const regionB = getRegionForDot(state, b);
-  return regionA !== null && regionA === regionB;
+  if (!state.dots.some(d => d.id === a) || !state.dots.some(d => d.id === b)) return false;
+
+  const faces = traceFaces(state.edges, state.rotations);
+  const dotIds = state.dots.map(d => d.id);
+  const components = getComponents(state.edges, dotIds);
+  const repOf = new Map();
+  components.forEach(members => members.forEach(id => repOf.set(id, members[0])));
+
+  const compA = repOf.get(a);
+  const compB = repOf.get(b);
+
+  const faceA = cornerFace(state.edges, state.rotations, faces, a, 0);
+  const faceB = cornerFace(state.edges, state.rotations, faces, b, 0);
+  if (faceA === faceB) return true;
+
+  const outerA = resolveOuterFaceAnchor(faces, state.outerFaceAnchor[compA]);
+  const outerB = resolveOuterFaceAnchor(faces, state.outerFaceAnchor[compB]);
+  const parentA = resolveParentAnchor(faces, state.parentAnchor[compA]);
+  const parentB = resolveParentAnchor(faces, state.parentAnchor[compB]);
+
+  // B's whole component occupies A's face?
+  if (faceB === outerB && parentB === faceA) return true;
+  // A's whole component occupies B's face?
+  if (faceA === outerA && parentA === faceB) return true;
+  // Siblings under a common parent face (both null => both roots,
+  // sharing the ONE plane's outer region — still "common", per D4).
+  if (faceA === outerA && faceB === outerB && parentA === parentB) return true;
+
+  return false;
 }
 
 /**
- * Returns true if two dots currently belong to the same boundary.
- *
- * This is the check that will determine split vs. merge at v0.9.2:
- * two dots on the SAME boundary → a single-boundary move (split);
- * two dots in the same region but on DIFFERENT boundaries → a
- * double-boundary move (merge). See design.md "Topological Model".
+ * Returns true if two dots' corner-0s currently belong to the same
+ * boundary (face) — simple face equality, unlike areDotsInSameRegion.
+ * This is the check that determines split vs. merge (spec D7): same
+ * face => single-boundary (split); different faces (whether or not
+ * they share a region) => double-boundary (merge).
  *
  * @param {object} state
  * @param {number} a
@@ -180,141 +226,32 @@ export function areDotsOnSameBoundary(state, a, b) {
 }
 
 /**
- * Returns the full boundary objects belonging to a region, resolving
- * the region's boundary id list into actual boundary data.
+ * Returns the full set of boundaries (face objects) belonging to a
+ * region: the host face itself, plus the outer face of every
+ * component currently occupying it (spec D4).
+ *
+ * Returns FACE OBJECTS ({component, darts}), not the old {id,
+ * vertices} shape — see file header.
  *
  * @param {object} state
  * @param {number} regionId
- * @returns {Array<{id: number, vertices: number[]}>}
+ * @returns {Array<{component:number, darts:number[]}>}
  */
 export function getBoundariesForRegion(state, regionId) {
-  const region = state.regions.find(r => r.id === regionId);
-  if (!region) return [];
-  return region.boundaries
-    .map(boundaryId => state.boundaries.find(b => b.id === boundaryId))
-    .filter(Boolean);
+  const faces = traceFaces(state.edges, state.rotations);
+  const hostFace = findFaceById(faces, regionId);
+  if (!hostFace) return [];
+
+  const occupantReps = computeK(faces, state.parentAnchor, hostFace, /* excludeRep, never matches */ -1);
+  const boundaries = [hostFace];
+  occupantReps.forEach(rep => {
+    const outerFace = resolveOuterFaceAnchor(faces, state.outerFaceAnchor[rep]);
+    if (outerFace) boundaries.push(outerFace);
+  });
+  return boundaries;
 }
 
-// ── Structural invariant checker ────────────────────────────────
-
-/** Coded structural violations checkInvariants() can report. */
-export const TopologyError = {
-  DOT_BOUNDARY_COUNT_WRONG:      'DOT_BOUNDARY_COUNT_WRONG',
-  BOUNDARY_REGION_COUNT_WRONG:   'BOUNDARY_REGION_COUNT_WRONG',
-  BOUNDARY_EDGE_MISSING:         'BOUNDARY_EDGE_MISSING',
-  EULER_FORMULA_VIOLATED:        'EULER_FORMULA_VIOLATED',
-};
-
-/**
- * Counts connected components over dots-as-nodes, edges-as-links.
- * Delegates to faces.js's getComponents() (v0.9.2 PR 3) — this used
- * to duplicate its own union-find here; now there is one
- * implementation, shared with the face tracer. Behavior (the count
- * returned) is unchanged.
- *
- * @param {object} state
- * @returns {number}
- */
-function countConnectedComponents(state) {
-  return getComponents(state.edges, state.dots.map(d => d.id)).length;
-}
-
-/**
- * Returns true if an edge exists between two dots, in either
- * direction (edges are unordered pairs).
- */
-function edgeExists(state, a, b) {
-  return state.edges.some(e => (e.a === a && e.b === b) || (e.a === b && e.b === a));
-}
-
-/**
- * Checks the structural well-formedness of the engine's topological
- * state. Pure function; does not mutate anything.
- *
- * Checks, in order:
- *   1. Every dot belongs to exactly one boundary.
- *   2. Every boundary belongs to exactly one region.
- *   3. Every consecutive pair in a boundary's cyclic vertex sequence
- *      is connected by a real edge (boundaries of length < 2 are
- *      trivially fine — a single-vertex boundary has no consecutive
- *      pairs to check).
- *   4. Euler's formula holds: V − E + F = 1 + C.
- *
- * See file header for why (4)'s test coverage is currently limited
- * to states already known correct — the boundary-orientation
- * convention needed to hand-construct a trustworthy multi-region
- * fixture is not yet verified against the source material.
- *
- * @param {object} state
- * @returns {{ ok: boolean, violations: Array<object> }}
- */
-export function checkInvariants(state) {
-  const violations = [];
-
-  // 1. Every dot in exactly one boundary.
-  const dotBoundaryCount = new Map(state.dots.map(d => [d.id, 0]));
-  state.boundaries.forEach(boundary => {
-    boundary.vertices.forEach(dotId => {
-      dotBoundaryCount.set(dotId, (dotBoundaryCount.get(dotId) ?? 0) + 1);
-    });
-  });
-  dotBoundaryCount.forEach((count, dotId) => {
-    if (count !== 1) {
-      violations.push({ rule: TopologyError.DOT_BOUNDARY_COUNT_WRONG, dotId, count });
-    }
-  });
-
-  // 2. Every boundary in exactly one region.
-  const boundaryRegionCount = new Map(state.boundaries.map(b => [b.id, 0]));
-  state.regions.forEach(region => {
-    region.boundaries.forEach(boundaryId => {
-      boundaryRegionCount.set(boundaryId, (boundaryRegionCount.get(boundaryId) ?? 0) + 1);
-    });
-  });
-  boundaryRegionCount.forEach((count, boundaryId) => {
-    if (count !== 1) {
-      violations.push({ rule: TopologyError.BOUNDARY_REGION_COUNT_WRONG, boundaryId, count });
-    }
-  });
-
-  // 3. Boundary vertex sequences correspond to real edges.
-  state.boundaries.forEach(boundary => {
-    const verts = boundary.vertices;
-    if (verts.length < 2) return; // trivial single-vertex boundary
-    for (let i = 0; i < verts.length; i++) {
-      const from = verts[i];
-      const to   = verts[(i + 1) % verts.length];
-      if (!edgeExists(state, from, to)) {
-        violations.push({
-          rule: TopologyError.BOUNDARY_EDGE_MISSING,
-          boundaryId: boundary.id,
-          from,
-          to,
-        });
-      }
-    }
-  });
-
-  // 4. Euler's formula: V − E + F = 1 + C.
-  const V = state.dots.length;
-  const E = state.edges.length;
-  const F = state.regions.length;
-  const C = countConnectedComponents(state);
-  const lhs = V - E + F;
-  const rhs = 1 + C;
-  if (lhs !== rhs) {
-    violations.push({
-      rule: TopologyError.EULER_FORMULA_VIOLATED,
-      V, E, F, C,
-      expected: rhs,
-      actual: lhs,
-    });
-  }
-
-  return { ok: violations.length === 0, violations };
-}
-
-// ── v0.9.2 PR 5 — new invariant checker (I-1…I-8) ────────────────
+// ── v0.9.2 PR 5 — invariant checker (I-1…I-8) ────────────────────
 
 /** Coded violations checkInvariantsV2() can report, beyond the
  *  containment-specific ones re-exported from containment.js. */
@@ -325,19 +262,17 @@ export const TopologyErrorV2 = {
 };
 
 /**
- * Checks I-1 through I-8 (spec §9.2) against the NEW (σ +
- * containment) topological model. Fully additive alongside the
- * existing checkInvariants() above, which still guards the legacy
- * stored regions/boundaries arrays — neither checker is modified by
- * the other's existence, per the migration plan's explicit
- * "old checker untouched" instruction for this PR.
+ * Checks I-1 through I-8 (spec §9.2) against the (σ + containment)
+ * topological model. This is now the ONLY invariant checker in this
+ * file — the legacy checkInvariants() (which enforced the disproven
+ * "every dot in exactly one boundary" invariant against the stored
+ * regions/boundaries arrays) is deleted as of PR 6.
  *
  * I-1…I-4 (containment structure) delegate to containment.js's
  * checkContainmentInvariants(). I-5 (Euler) uses the COUNTING form
  * F = ΣFc − C + 1 (spec D4) rather than building full region
- * objects — that's PR 6's job, not needed for this invariant. I-6/
- * I-7 (lives) are checked directly here. I-8 (π-domain exactness)
- * is a Move-level check and lives in rules.js, not here.
+ * objects. I-6/I-7 (lives) are checked directly here. I-8
+ * (π-domain exactness) is a Move-level check and lives in rules.js.
  *
  * @param {object} state
  * @returns {{ ok: boolean, violations: Array<object> }}

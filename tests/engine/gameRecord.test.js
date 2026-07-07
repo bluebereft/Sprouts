@@ -120,20 +120,19 @@ test('round trip: reproduces identical dots, edges, and currentPlayer', () => {
   assert.equal(result.state.currentPlayer, original.currentPlayer);
 });
 
-test('round trip: reproduces identical starting topology (regions, boundaries)', () => {
-  // v0.9 — regions/boundaries are derived state, same as dots/edges:
-  // never persisted in the Game Record itself, only re-seeded from
-  // initialDotCount on import. This confirms that re-seeding produces
-  // a structurally identical starting topology to the original game's,
-  // which it must, since both are built by the same buildInitialTopology()
-  // given the same initialDotCount.
+test('round trip: reproduces identical containment (outerFaceAnchor, parentAnchor)', () => {
+  // v0.9.2 PR 6 — regions/boundaries (this test's pre-cutover
+  // subject) no longer exist as separate stored state; the legacy
+  // seeded arrays were deleted. Containment IS still derived/
+  // re-seeded and, like rotations, grows with every move (PR 5) — so
+  // this exercises the reducer's containment-update determinism
+  // through replay, the same way the rotations test below does for
+  // sigma.
   const original = playTwoMoves();
   const result = importGame(exportGame(original));
 
-  assert.deepEqual(result.state.regions, original.regions);
-  assert.deepEqual(result.state.boundaries, original.boundaries);
-  assert.equal(result.state.nextRegionId, original.nextRegionId);
-  assert.equal(result.state.nextBoundaryId, original.nextBoundaryId);
+  assert.deepEqual(result.state.outerFaceAnchor, original.outerFaceAnchor);
+  assert.deepEqual(result.state.parentAnchor, original.parentAnchor);
 });
 
 test('round trip: reproduces identical rotations (sigma)', () => {

@@ -464,17 +464,48 @@ PR 5b implementation review). **Note for PR 7:** this check is a
 provable special case of PR 7's eventual general region-legality
 machinery; PR 7 should generalize or absorb it, not duplicate it.
 
-**PR 6 — cutover (Stage D; version → v0.9.2).** Objective: queries
+**PR 6 — cutover (Stage D; version → v0.9.2).** ✅ **IMPLEMENTATION
+COMPLETE, not yet committed.** Objective: queries
 re-target the derived view; stored arrays, counters,
 `DOT_BOUNDARY_COUNT_WRONG`, and the old checker deleted; F1's
-null-for-sprouts bug ceases to exist. Files: `regions.js` (bodies),
-`gameRecord.js`/`ui.js` (seeding shape), `regions.test.js` (fixtures
-rebuilt from scripted moves — the one PR with heavy test churn,
-accepted because the *contracts* under test are unchanged). Tests:
-all five queries against multi-region positions produced by real
-moves; `getRegionForDot(sprout)` now real. Invariants after: spec
-§4's MUST-NOT-store list is satisfied; grep confirms no orphaned
-references to removed fields.
+null-for-sprouts bug ceases to exist. Files: `regions.js` (bodies) —
+`gameRecord.js`/`ui.js` needed ZERO changes (grep-confirmed before
+implementation: only `getRegionForDot` has an external caller, and
+its contract — number in, number or null out — is preserved exactly;
+`gameRecord.js` only ever spreads `buildInitialTopology(...)`, never
+references field names). `regions.test.js` and `gameRecord.test.js`
+rebuilt/fixed — the one PR with heavy test churn, accepted because
+the *contracts* under test are unchanged. Tests: all five queries
+against real multi-region positions built via scripted moves (a
+star/tree for shared-boundary siblings; a self-loop bigon for
+different-boundary/different-region within one component; two
+never-connected isolated dots confirming they already share the
+plane's one outer region — real, reachable, and would be wrong under
+naive face-equality); `getRegionForDot(sprout)` now real, explicit
+F1-closure test. 168/168 tests passing.
+
+**Three findings from the cutover design/implementation, recorded
+because they change what these functions mean, not just how they're
+computed:** (1) a "boundary" is a face, given a disjoint numeric id
+(smallest dart, or -(component+1) for trivial faces); (2) region and
+boundary are the SAME identifier at the single-corner level, but
+comparing two DIFFERENT dots' regions is never simple face equality
+— spec D4's region = host face + occupants' outer walks means two
+dots can share a region while on different faces (confirmed by the
+"two unconnected isolated dots" test above, which the old, naive
+v0.9.1 equality check would have gotten right only by accident of
+having no occupant hierarchy at all); (3) `getRegionForDot`'s
+corner-0 convention is documented as arbitrary-but-fixed, same
+precedent as PR 3/PR 4, since its only caller (`ui.js`) doesn't yet
+supply a real corner and its result isn't read for correctness by
+anything (region-legality is PR 7's job). The occupant branch of (2)
+is NOT reachable via real gameplay yet (PR 5's restricted containment
+scope) — hand-built and clearly labeled, same discipline as
+`containment.test.js`. A real hand-trace error (wrong vertex assumed
+to be "on the occupied face") was caught and fixed while writing that
+fixture — same pattern as PR 5b's caught error, worth noting twice
+now as a real, recurring benefit of writing out traces in test
+comments rather than just asserting expected values.
 
 **PR 7 — region-aware legality (v0.9.3).** Objective: `validateMove`
 gains `DIFFERENT_REGIONS` + π-domain exactness (I-8); UI message map
