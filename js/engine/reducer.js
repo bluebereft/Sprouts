@@ -30,12 +30,15 @@
 
    v0.9.2 PR 4 — corner-driven insertion
    ────────────────────────────────────────
-   If move.startCorner and move.endCorner are both present (the v2
-   Move shape, spec §7.1-7.2), the new darts are inserted at exactly
-   those corners — real σ, not a placeholder. If either is absent
-   (the legacy v1 shape, e.g. a replayed formatVersion 1 Game
-   Record), both new endpoint darts fall back to APPEND, unchanged
-   from PR 2 (documented legacy path, spec open question O-Q1).
+   If move.startCorner and move.endCorner are both present, the new
+   darts are inserted at exactly those corners — real σ, not a
+   placeholder. If either is absent, both new endpoint darts fall
+   back to APPEND (unchanged from PR 2). This is a general
+   convenience for any caller that doesn't need to specify an exact
+   corner (tests, bots, quick construction) — as of PR 8, it is no
+   longer tied to Game Record compatibility; formatVersion 1 (the
+   only format this fallback was ever specifically needed for) is
+   dropped entirely (spec O-Q1, product ruling).
 
    Every move still performs exactly ONE uniform update regardless of
    normal/loop distinctions (spec §8.1) — corner-driven insertion is
@@ -62,12 +65,12 @@
    components with no occupants, and splits with K = ∅. Nested
    containment is a known, documented limitation, not yet handled.
 
-   For legacy (cornerless) moves, classification uses an IMPLIED
-   corner — "after the last existing dart" (or the trivial corner 0
-   for degree-0), exactly matching what the append fallback above
-   already does structurally. This keeps classification well-defined
-   for every move this function accepts, without requiring a v1/v2
-   branch in the containment logic itself.
+   For moves without explicit corners, classification uses an
+   IMPLIED corner — "after the last existing dart" (or the trivial
+   corner 0 for degree-0), exactly matching what the append fallback
+   above already does structurally. This keeps classification
+   well-defined for every move this function accepts, without
+   requiring a branch in the containment logic itself.
 
    IMPORTANT RULES:
    - NO DOM access
@@ -97,7 +100,7 @@ import { updateContainmentForMerge, updateContainmentForSplit } from './containm
  * @param {Array}  state.rotations     - σ: rotations[v] = dart ids at v
  * @param {object} state.outerFaceAnchor - containment (v0.9.2 PR 5)
  * @param {object} state.parentAnchor    - containment (v0.9.2 PR 5)
- * @param {Object} move                - { startDotId, endDotId, regionId, startCorner, endCorner, placement }
+ * @param {Object} move                - { startDotId, endDotId, startCorner, endCorner, placement }
  *
  * @returns {Object} new game state
  */

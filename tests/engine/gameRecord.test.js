@@ -14,6 +14,11 @@
    v0.9: fixtures now seed topology (regions/boundaries) via
    buildInitialTopology(), matching exactly what a real game's
    starting state looks like post-v0.9 — see freshState() below.
+
+   v0.9.4 PR 8: FORMAT_VERSION bumped to 2 (regionId retired,
+   corners/placement serialized instead — spec §7.5). formatVersion 1
+   is dropped entirely (spec O-Q1, product ruling) and rejected the
+   same way any unsupported version already was.
    ================================================================ */
 
 import { test } from 'node:test';
@@ -74,11 +79,15 @@ test('exportGame: does NOT include dots, edges, nextDotId, or currentPlayer', ()
   assert.equal('currentPlayer' in record, false);
 });
 
-test('exportGame: moves are plain {startDotId, endDotId, regionId} objects', () => {
+test('exportGame: moves are plain {startDotId, endDotId, startCorner, endCorner, placement} objects', () => {
+  // v0.9.4 PR 8: regionId retired, corners/placement serialized
+  // instead (spec §7.5). playTwoMoves() constructs moves via the
+  // convenience fallback (no explicit corners), so both fields
+  // faithfully export as null.
   const state = playTwoMoves();
   const record = exportGame(state);
-  assert.deepEqual(record.moves[0], { startDotId: 0, endDotId: 1, regionId: 0 });
-  assert.deepEqual(record.moves[1], { startDotId: 2, endDotId: 2, regionId: 0 });
+  assert.deepEqual(record.moves[0], { startDotId: 0, endDotId: 1, startCorner: null, endCorner: null, placement: null });
+  assert.deepEqual(record.moves[1], { startDotId: 2, endDotId: 2, startCorner: null, endCorner: null, placement: null });
 });
 
 test('exportGameToJSON: produces valid, parseable JSON', () => {
@@ -90,24 +99,20 @@ test('exportGameToJSON: produces valid, parseable JSON', () => {
 // ── importGame: round trip ──────────────────────────────────────
 
 test('round trip: importGame(exportGame(state)) reproduces the same moves', () => {
-  // v0.9.2 PR 4: createMove() now defaults startCorner/endCorner/
-  // placement to null, so a LIVE game's state.moves may carry those
-  // extra (null) fields, while importGame() always reconstructs the
-  // minimal v1 shape (Game Records are still formatVersion 1 and
-  // never carry corner data — see move.js/gameRecord.js file
-  // headers). The round-trip guarantee that actually matters is
-  // over the v1-meaningful fields; comparing extra incidental nulls
-  // would conflate "same game" with "byte-identical Move object",
-  // which even the spec's own state-equivalence principle (§10.4)
-  // says not to do.
+  // v0.9.4 PR 8: with regionId retired, both a live game's moves
+  // (built via createMove()) and a replayed record's moves (built
+  // by importGame()) now share the exact same shape —
+  // {startDotId, endDotId, startCorner, endCorner, placement} — so a
+  // direct comparison works with no shape-stripping needed. (PR 4
+  // through PR 7 needed a stripping helper here, since regionId's
+  // presence/absence varied by construction path; that workaround is
+  // gone along with regionId itself.)
   const original = playTwoMoves();
   const record = exportGame(original);
   const result = importGame(record);
 
-  const toV1Shape = m => ({ startDotId: m.startDotId, endDotId: m.endDotId, regionId: m.regionId });
-
   assert.equal(result.ok, true);
-  assert.deepEqual(result.state.moves.map(toV1Shape), original.moves.map(toV1Shape));
+  assert.deepEqual(result.state.moves, original.moves);
 });
 
 test('round trip: reproduces identical dots, edges, and currentPlayer', () => {
@@ -167,11 +172,10 @@ test('round trip: via JSON string end to end', () => {
   const json = exportGameToJSON(original);
   const result = importGameFromJSON(json);
 
-  // Same v1-shape comparison rationale as the round-trip test above.
-  const toV1Shape = m => ({ startDotId: m.startDotId, endDotId: m.endDotId, regionId: m.regionId });
-
+  // Same simplification as the round-trip test above — no
+  // shape-stripping needed now that regionId is gone.
   assert.equal(result.ok, true);
-  assert.deepEqual(result.state.moves.map(toV1Shape), original.moves.map(toV1Shape));
+  assert.deepEqual(result.state.moves, original.moves);
 });
 
 test('round trip: works for a game with startingPlayer 1', () => {
@@ -195,6 +199,42 @@ test('importGame: rejects a record with the wrong formatVersion', () => {
   const result = importGame({ formatVersion: 999, initialDotCount: 2, startingPlayer: 0, moves: [] });
   assert.equal(result.ok, false);
   assert.equal(result.error, ImportError.INVALID_FORMAT_VERSION);
+});
+
+test('importGame: rejects a formatVersion 1 record (spec O-Q1 — dropped entirely, not migrated)', () => {
+  // The exact old v1 shape — dropped, not given special handling;
+  // rejected the identical way any other unsupported version is.
+  const v1Record = {
+    formatVersion: 1,
+    initialDotCount: 2,
+    startingPlayer: 0,
+    moves: [{ startDotId: 0, endDotId: 1, regionId: 0 }],
+  };
+  const result = importGame(v1Record);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, ImportError.INVALID_FORMAT_VERSION);
+});
+
+test('P-O5: round trip preserves real corners AND convenience-fallback (null) corners in the same game', () => {
+  // Discharges P-O5 (spec S11.3): corner-index serialization must
+  // round-trip under replay. A mix, not just one or the other,
+  // since that's the case most likely to expose a serialization bug
+  // (e.g. accidentally coercing null to 0, or vice versa).
+  let state = freshState();
+  state = applyMove(state, createMove(0, 1)); // convenience fallback: null corners
+  state = applyMove(state, createMove(0, 1, 0, 0)); // explicit real corners
+
+  const record = exportGame(state);
+  assert.equal(record.moves[0].startCorner, null);
+  assert.equal(record.moves[1].startCorner, 0);
+  assert.equal(record.moves[1].endCorner, 0);
+
+  const result = importGame(record);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.state.moves, state.moves);
+  assert.deepEqual(result.state.rotations, state.rotations);
+  assert.deepEqual(result.state.outerFaceAnchor, state.outerFaceAnchor);
+  assert.deepEqual(result.state.parentAnchor, state.parentAnchor);
 });
 
 test('importGame: rejects a non-object record', () => {
@@ -237,8 +277,8 @@ test('importGame: rejects a record whose move sequence is illegal', () => {
     // dot 0 starts with 3 lives; a self-loop needs 2. Second loop
     // attempt on the same dot leaves only 1 life — illegal.
     moves: [
-      { startDotId: 0, endDotId: 0, regionId: 0 },
-      { startDotId: 0, endDotId: 0, regionId: 0 },
+      { startDotId: 0, endDotId: 0 },
+      { startDotId: 0, endDotId: 0 },
     ],
   };
   const result = importGame(record);
@@ -277,8 +317,8 @@ test('importGame: a failed import does not affect a subsequent successful import
     initialDotCount: 1,
     startingPlayer: 0,
     moves: [
-      { startDotId: 0, endDotId: 0, regionId: 0 },
-      { startDotId: 0, endDotId: 0, regionId: 0 }, // illegal
+      { startDotId: 0, endDotId: 0 },
+      { startDotId: 0, endDotId: 0 }, // illegal
     ],
   };
   const goodRecord = exportGame(playTwoMoves());

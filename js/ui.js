@@ -43,7 +43,7 @@
 
 import { createMove } from './engine/move.js';
 import { playerForMove, isExhausted, RuleError } from './engine/rules.js';
-import { getRegionForDot, buildInitialTopology } from './engine/regions.js';
+import { buildInitialTopology } from './engine/regions.js';
 import Engine from './engine/engine.js';
 import SelectionState from './selectionState.js';
 import BoardView from './boardView.js';
@@ -178,9 +178,13 @@ const UI = (() => {
       // This is an interaction shortcut (avoids letting the player
       // draw a whole curve before finding out it's illegal), not a
       // second, independent implementation of the rule.
-      const engineState = Engine.getState();
-      const regionId = getRegionForDot(engineState, clickedId);
-      const candidateMove = createMove(clickedId, clickedId, regionId);
+      // v0.9.4 PR 8: corner-0 is a documented placeholder, not real
+      // corner resolution — that needs actual drawn-curve geometry
+      // (js/cornerResolution.js exists but isn't wired in yet).
+      // Without this, EVERY move would be rejected the moment the
+      // reducer requires real corners; this keeps play working while
+      // real resolution remains future work.
+      const candidateMove = createMove(clickedId, clickedId, 0, 0);
       const validation = Engine.validate(candidateMove);
 
       if (!validation.ok) {
@@ -237,11 +241,12 @@ const UI = (() => {
     const prevSecond = b;
 
     const engineStateBefore = Engine.getState();
-    const regionId     = getRegionForDot(engineStateBefore, a);
     const moveIndex    = engineStateBefore.moves.length;
     const actingPlayer = playerForMove(moveIndex, engineStateBefore.startingPlayer ?? 0);
 
-    const move = createMove(a, b, regionId);
+    // v0.9.4 PR 8: corner-0 is a documented placeholder — see the
+    // self-loop shortcut above for why it's needed and what it costs.
+    const move = createMove(a, b, 0, 0);
     const result = Engine.apply(move);
 
     if (!result.ok) {

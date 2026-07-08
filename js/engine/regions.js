@@ -50,12 +50,15 @@
        different faces — "which region is this dot in," asked
        without specifying a corner, is genuinely ambiguous (the same
        finding that motivated Move needing corners at all). Since
-       getRegionForDot's only caller (ui.js) doesn't yet supply a
-       corner, and its result (Move.regionId) is not read for
-       correctness by anything (region-legality isn't checked until
-       PR 7), corner 0 is used as a documented, deterministic — but
-       arbitrary — convention, matching the precedent set by PR 3's
-       φ-direction choice and PR 4's default-corner insertion.
+       getRegionForDot's only caller (ui.js) doesn't yet resolve a
+       real corner from drawn geometry (it supplies a documented
+       corner-0 placeholder — see ui.js and move.js's PR 8 notes),
+       corner 0 is used here too as a deterministic — but arbitrary —
+       convention, matching the precedent set by PR 3's φ-direction
+       choice and PR 4's default-corner insertion. (Region-aware
+       legality is checked as of PR 7 — Move.regionId, which this
+       comment originally referenced as "not read for correctness,"
+       no longer exists at all; it was retired at PR 8.)
 
    getBoundariesForRegion now returns FACE OBJECTS ({component,
    darts}), not the old {id, vertices} shape — an honest

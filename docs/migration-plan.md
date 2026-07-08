@@ -550,33 +550,54 @@ yet reachable from real gameplay — `ui.js` still only constructs
 legacy (cornerless) moves; browser wiring for real corners remains
 PR 4's still-standing deferred scope decision. 169/169 tests passing.
 
-**PR 8 — Game Record formatVersion 2 (v0.9.4; gated on O-Q1).**
-Objective: serialize corners + placement per spec §7.5; apply the
-O-Q1 ruling to v1 imports; retire `regionId` from Move; discharge
-P-O5 (round-trip under replay).
+**PR 8 — Game Record formatVersion 2 (v0.9.4).** ✅ **IMPLEMENTATION
+COMPLETE, not yet committed.** Objective: serialize corners +
+placement per spec §7.5; apply the O-Q1 ruling to v1 imports; retire
+`regionId` from Move; discharge P-O5 (round-trip under replay).
 
-**O-Q1 ruling (Jared, product decision): v1 records are dropped
-entirely.** No migration path, no default-corner fallback, no
-backward-compatible replay is built. `gameRecord.js`'s formatVersion
-gate moves to requiring formatVersion 2 only; anything else
-(including v1) is rejected the same way an invalid version already
-is today — this is a simplification of the gate, not new rejection
-logic. This removes O-Q1's ambiguity rather than resolving it: there
-is no old data left to be ambiguous about.
+**O-Q1 ruling applied: v1 records dropped entirely.** `gameRecord.js`
+now requires formatVersion 2; anything else (including v1) is
+rejected via the existing, unmodified `INVALID_FORMAT_VERSION` path
+— confirmed with an explicit test using the exact old v1 shape.
 
-**Consequence to settle at PR 8's design step, not assumed here:**
-with v1 import gone, the reducer's legacy (cornerless, append-only
-σ-insertion) code path in `reducer.js` — built at PR 2, kept through
-PR 4–7 specifically to support v1 replay — has no remaining caller.
-Whether to remove it (dead-code elimination, simplifying `reducer.js`
-back toward a single code path) or keep it (e.g. as a convenience for
-constructing moves without computing corners, in tests or future
-bots) is a real design choice for PR 8, not a foregone conclusion —
-flagged here so it isn't decided by default.
+**The reducer's legacy-path question, resolved:** kept, deliberately
+decoupled from v1 framing. Precise count taken before implementing
+(not assumed): only 4 non-trivial `createMove()` call sites exist
+across the whole codebase (2 in `ui.js`, 2 in `reducer.test.js`) —
+the other ~87 use the plain two-argument form and are entirely
+unaffected by removing `regionId` from a middle position. This
+confirmed keeping the fallback (as a general construction
+convenience, no longer tied to any Game Record format) was the right
+call, made explicitly rather than assumed, after an earlier
+under-scoped explanation of the tradeoff was caught and corrected
+before the decision was finalized.
 
-Files: `gameRecord.js`, `move.js` (retire `regionId`), `reducer.js`
-(pending the legacy-path decision above), tests. Invariants after:
-v2 round-trips exactly; `regionId` gone via stale-reference sweep.
+**Two real bugs caught during implementation, same discipline as
+PR 5b/6/7's caught hand-trace errors, different category this time:**
+(1) the two `reducer.test.js` corner-bearing calls shifted argument
+meaning silently when `regionId` was removed from position 3 —
+anticipated explicitly in the design step, still happened, caught
+immediately by the test suite's clear diff output, fixed in the same
+pass. (2) `gameRecord.test.js`'s `toV1Shape` comparator compared
+`m.regionId` on both round-trip sides — once `regionId` doesn't
+exist anywhere, this would silently compare `undefined === undefined`
+and pass without checking anything, the same coincidental-pass
+pattern PR 6 caught in a different test. Fixed by recognizing the
+entire workaround was obsolete: both sides share the same v2 shape
+now, so a direct `deepEqual` is simpler AND strictly more correct
+than the stripping helper it replaced.
+
+`ui.js`'s `getRegionForDot` import, both call sites, and one now-dead
+local variable were removed as a direct, verified consequence, not
+spuriously — `regions.js`'s own unrelated `getBoundariesForRegion`
+`regionId` parameter (the derived-view face identifier from PR 6)
+was correctly left untouched throughout.
+
+Files: `move.js` (regionId retired), `gameRecord.js` (v2 shape),
+`reducer.js`/`rules.js`/`regions.js` (documentation reframing only,
+no functional change), `ui.js` (corner-0 placeholder, dead-code
+removal), `reducer.test.js` + `gameRecord.test.js` (fixture/comparator
+updates). 171/171 tests passing (169 prior + 2 new).
 
 Every PR: compiles, all tests green, no observable behaviour change
 until PR 6 (which changes only what was already wrong — F1) and PR 7

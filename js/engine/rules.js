@@ -156,7 +156,7 @@ function cornerCount(degree) {
  * actually illegal).
  *
  * @param {object} state — engine state { dots, edges, moves, rotations, ... }
- * @param {object} move  — { startDotId, endDotId, regionId, startCorner, endCorner, placement }
+ * @param {object} move  — { startDotId, endDotId, startCorner, endCorner, placement }
  * @returns {{ ok: boolean, violations: Array<{ rule: string, dotId: number }> }}
  */
 export function validateMove(state, move) {

@@ -51,6 +51,17 @@
    No DOM. No browser APIs beyond JSON, which is standard JS, not a
    browser-specific API — this file runs identically under Node.
 
+   v0.9.4 PR 8 — formatVersion 2, formatVersion 1 dropped entirely
+   ─────────────────────────────────────────────────────────────────
+   Game Records now serialize a move's real startCorner/endCorner/
+   placement (spec §7.5) instead of the retired regionId. formatVersion
+   1 is not supported for import at all — spec open question O-Q1 was
+   resolved (product ruling) as: drop old records entirely, no
+   migration path, no default-corner fallback. A v1 record is now
+   rejected the exact same way any other unsupported version already
+   was (INVALID_FORMAT_VERSION) — this is a simplification of the
+   version gate, not new rejection logic.
+
    Depends on: reducer.js, rules.js, regions.js
    ================================================================ */
 
@@ -59,7 +70,7 @@ import { validateMove } from './rules.js';
 import { buildInitialTopology } from './regions.js';
 
 /** Current Game Record format version. Bump when the shape changes. */
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
 
 /** Coded reasons importGame()/importGameFromJSON() can fail. */
 export const ImportError = {
@@ -149,10 +160,15 @@ function validateRecordShape(record) {
  * persisting it would tie saved files to one moment in the engine's
  * internal representation.
  *
+ * Serializes each move's real startCorner/endCorner/placement
+ * (spec §7.5) — including null, faithfully representing a move that
+ * used the reducer's general append-only convenience rather than an
+ * explicit corner (see move.js/reducer.js file headers).
+ *
  * @param {object} state — engine state (e.g. from Engine.getState())
  * @returns {{ formatVersion: number, initialDotCount: number,
  *             startingPlayer: number,
- *             moves: Array<{startDotId, endDotId, regionId}> }}
+ *             moves: Array<{startDotId, endDotId, startCorner, endCorner, placement}> }}
  */
 export function exportGame(state) {
   return {
@@ -160,9 +176,11 @@ export function exportGame(state) {
     initialDotCount: state.initialDotCount,
     startingPlayer:  state.startingPlayer,
     moves: state.moves.map(m => ({
-      startDotId: m.startDotId,
-      endDotId:   m.endDotId,
-      regionId:   m.regionId,
+      startDotId:  m.startDotId,
+      endDotId:    m.endDotId,
+      startCorner: m.startCorner ?? null,
+      endCorner:   m.endCorner ?? null,
+      placement:   m.placement ?? null,
     })),
   };
 }
@@ -205,9 +223,11 @@ export function importGame(record) {
   for (let i = 0; i < record.moves.length; i++) {
     const m = record.moves[i];
     const move = {
-      startDotId: m.startDotId,
-      endDotId:   m.endDotId,
-      regionId:   m.regionId ?? 0,
+      startDotId:  m.startDotId,
+      endDotId:    m.endDotId,
+      startCorner: m.startCorner ?? null,
+      endCorner:   m.endCorner ?? null,
+      placement:   m.placement ?? null,
     };
 
     const validation = validateMove(state, move);

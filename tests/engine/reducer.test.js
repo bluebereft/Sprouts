@@ -244,7 +244,7 @@ test('applyMove: with corners, inserts the new dart at the exact specified gap, 
   const beforeEdgeCount = state.edges.length;
   const newStartDart = 2 * beforeEdgeCount; // the dart this move will create at dot0
 
-  state = applyMove(state, createMove(0, 1, 0, 1, 0)); // startCorner=1, endCorner=0
+  state = applyMove(state, createMove(0, 1, 1, 0)); // startCorner=1, endCorner=0
   // Inserted immediately after position 1 (dart 4): [0, 4, newStartDart, 8]
   assert.deepEqual(state.rotations[0], [0, 4, newStartDart, 8]);
 });
@@ -275,7 +275,7 @@ test('applyMove: self-loop with real corners inserts both new darts correctly wi
   const endDart    = 2 * (beforeEdgeCount + 1); // 10
 
   // Self-loop: startCorner=1 (after dart 4), endCorner=0 (after dart 0).
-  state = applyMove(state, createMove(0, 0, 0, 1, 0));
+  state = applyMove(state, createMove(0, 0, 1, 0));
   // Expected: process descending by original index — endCorner(0)
   // is lower than startCorner(1), so startCorner's insertion is
   // handled first against the original array, landing dart 8 after
@@ -287,7 +287,7 @@ test('applyMove: self-loop with real corners inserts both new darts correctly wi
 test('applyMove: corner-driven insertion still satisfies the sigma-partition invariant', () => {
   let state = freshState();
   state = applyMove(state, createMove(0, 1));
-  state = applyMove(state, createMove(0, 1, 0, 0, 0));
+  state = applyMove(state, createMove(0, 1, 0, 0));
 
   const totalDarts = 2 * state.edges.length;
   const seen = new Array(totalDarts).fill(0);
