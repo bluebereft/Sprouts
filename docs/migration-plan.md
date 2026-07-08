@@ -550,8 +550,8 @@ yet reachable from real gameplay — `ui.js` still only constructs
 legacy (cornerless) moves; browser wiring for real corners remains
 PR 4's still-standing deferred scope decision. 169/169 tests passing.
 
-**PR 8 — Game Record formatVersion 2 (v0.9.4).** ✅ **IMPLEMENTATION
-COMPLETE, not yet committed.** Objective: serialize corners +
+**PR 8 — Game Record formatVersion 2 (v0.9.4).** ✅ **COMPLETE** —
+merged to `main` (commit `1bb0b7a`). Objective: serialize corners +
 placement per spec §7.5; apply the O-Q1 ruling to v1 imports; retire
 `regionId` from Move; discharge P-O5 (round-trip under replay).
 
