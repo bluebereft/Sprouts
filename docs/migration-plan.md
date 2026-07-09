@@ -297,9 +297,9 @@ browser layer.
 
 ## Phase 7 — PR roadmap
 
-Suggested version mapping: PR 1–6 = v0.9.2 (landed as six reviewable
-sub-steps, version bumped once at PR 6); PR 7 = v0.9.3; PR 8 = v0.9.4.
-Mapping is Jared's call; the sequence is not.
+Version mapping (confirmed, Jared, July 2026): PR 1–6 = v0.9.2 (landed
+as six reviewable sub-steps, version bumped once at PR 6); PR 7 =
+v0.9.3; PR 8 = v0.9.4. Folded into ROADMAP.md.
 
 **PR 0 — hygiene (optional, any time).** Objective: fix `models.js`'s
 stale header comment (already flagged in ROADMAP); sync version
@@ -745,8 +745,9 @@ not plumbing.
 
 ## Open items carried
 
-1. **O-Q1 ruling** (default-corner vs. reject for v1 imports) —
-   tech lead, needed before PR 8.
-2. **Version mapping** of PRs to v0.9.2/…/v0.9.4 — Jared's call.
+1. ~~**O-Q1 ruling**~~ — resolved (Jared): v1 Game Records dropped
+   entirely, no migration path. See PR 8 / v0.9.4.
+2. ~~**Version mapping**~~ — resolved (Jared, July 2026): see Phase 7
+   above, folded into ROADMAP.md.
 3. **Lives field removal** (dots as bare ids) — optional, revisit
    after PR 8 when I-6 has run for a while.

@@ -451,7 +451,7 @@ different object.
   belong — possibly a canonicalisation-layer concept rather than an
   engine one
 
-#### v0.9.2 — Reducer learns to mutate the topological model (spec complete, implementation not started)
+#### v0.9.2 — Reducer learns to mutate the topological model (implemented — PRs 1-6, merged; six reviewable sub-steps landed under one version: darts, σ, tracer/oracle, Move v2 + corners, containment, cutover — see docs/migration-plan.md)
 - Expected to be the hardest algorithm in the project so far
 - **Literature verification pass: DONE (July 2026)** — against the full
   Čížek & Balko text (arXiv:2108.07671 including its appendix, which
@@ -462,7 +462,7 @@ different object.
   July 2026); implementation proceeds per `docs/migration-plan.md`**
   (PR-level sequence: darts → σ → tracer/oracle → Move v2 + corner
   resolution → containment → cutover; then v0.9.3 legality and a
-  formatVersion-2 milestone)
+  formatVersion-2 milestone, v0.9.4)
 - Key outcomes, recorded here so this entry is readable without the
   chat history:
   - The v0.9.1 data model (boundaries as dot-id lists) cannot represent
@@ -481,10 +481,13 @@ different object.
     function (spec §7); Game Records will need formatVersion 2
 - **Implementation is gated on the spec's proof obligations** P-O1
   through P-O4 (P-O5 blocks only formatVersion 2) — see spec §11.3
-- **Open decision needed at the v0.9.2/v0.9.3 boundary (tech lead):**
-  O-Q1 — formatVersion 1 Game Records carry no corner data and are
-  ambiguous under the new model at degree-2 endpoints; default-corner
-  replay vs. rejection. Spec §12
+  — all satisfied; see docs/migration-plan.md for the per-PR record
+- **O-Q1 resolved (Jared, product decision):** formatVersion 1 Game
+  Records dropped entirely — no migration path, no default-corner
+  fallback, no backward-compatible replay. Spec §12 updated;
+  `js/engine/gameRecord.js` rejects v1 shapes via
+  `INVALID_FORMAT_VERSION`. Implemented in PR 8
+  (`formatVersion` bumped to 2, `regionId` retired)
 - **Minor cleanup candidate, not blocking:** `js/models.js`'s header
   comment and doc-block still describe `createDot` as used by "the
   engine layer" / "reserved for the game engine." Stale since the v0.5
@@ -494,19 +497,68 @@ different object.
   v0.9.1). Comment-only; worth fixing whenever `selectionState.js` is
   next touched, e.g. if v0.9.2/v0.9.3 UI work goes near it
 
-#### v0.9.3 — Region-aware legality (not yet started)
-- `validateMove` gains a new coded violation (e.g. `DIFFERENT_REGIONS`)
-  when the two dots involved don't share a region
+#### v0.9.3 — Region-aware legality (implemented — PR 7, merged; PR 5b absorbed)
+- `validateMove` gained a new coded violation, `DIFFERENT_REGIONS`,
+  when the two dots involved don't share a region — generalizes and
+  absorbs PR 5b's narrower `SAME_COMPONENT_DIFFERENT_FACE` check
+  (removed, not duplicated)
 - Crossing detection remains v1.0's job, not this version's — v0.9.3 is
   "the engine enforces that a move stays within one region," not
   "the engine detects an edge crossing within a region"
 
-### v1.0 — Fully Playable Sprouts
-- Complete legal move generation
-- Game-over detection
-- Crossing detection integrated into engine rules, reusing the geometry
-  primitives that already exist from v0.7 (`crossingDetection.js`) and
-  building on v0.9's now-real topological model
+#### v0.9.4 — Game Record formatVersion 2 (implemented — PR 8, merged)
+- `regionId` retired entirely from `Move`/`createMove`; new signature
+  `createMove(startDotId, endDotId, startCorner=null, endCorner=null,
+  placement=null)` serializes real corners/placement (spec §7.5)
+  instead of `regionId`
+- `FORMAT_VERSION` bumped to 2; v1 records rejected via the existing,
+  unmodified `INVALID_FORMAT_VERSION` path — no migration, no
+  default-corner fallback (O-Q1, resolved under v0.9.2 above)
+- `ui.js`: both `createMove()` call sites carry the documented
+  corner-0 placeholder (real corner resolution is v1.0 PR 9's job,
+  below); dead `getRegionForDot` import/calls removed
+
+### v1.0 — Fully Playable Sprouts (in progress — see docs/migration-plan.md)
+
+The migration (darts → σ → containment → cutover → region-aware
+legality) is complete and merged through PR 8 / v0.9.4. What's left to
+reach "fully playable" is **not** migration cleanup — it's real
+feature gaps, sequenced as follows (agreed July 2026):
+
+- **PR 9 — Wire real corner resolution into the browser.** `ui.js`
+  currently passes a hardcoded corner-0 placeholder on every move
+  (PR 4/PR 8 stopgap); `js/cornerResolution.js` was built and tested
+  at PR 4 but never wired in. Until this lands, the browser can
+  silently resolve a drawn move to the wrong corner on any dot with
+  degree ≥ 2. Small, self-contained — mostly plumbing, no new game
+  logic. Done first so the harder PR below can be manually verified
+  in-browser as it's built, not just via headless tests.
+- **PR 10 — Nonempty-K placement (enclosure / nested containment).**
+  The biggest remaining gap: PR 5's containment layer only handles
+  root-merges and K=∅ splits (spec-documented restriction); any move
+  that would enclose another component — the ordinary Sprouts case of
+  looping a line around another dot — is currently accepted by the
+  engine without ever registering the enclosure (confirmed by direct
+  test: the engine has no coordinates, so K comes back empty for any
+  component that was never previously nested, regardless of what was
+  actually drawn). This doesn't yet cause a visible browser bug —
+  nothing today reads containment in a way that would expose it — but
+  it will silently corrupt region-legality answers the moment
+  anything depends on it (enumeration, game-over detection, puzzle
+  generation, bots). Requires: (1) a literature check of the
+  boundary-orientation convention against Čížek & Balko before design
+  (open item R2, migration-plan.md), (2) full Design → Design Review
+  → tech-lead sign-off given the conceptual difficulty, (3) absorbs
+  the multi-region Euler formula test coverage deferred at PR 6.
+  Largest PR remaining; everything after it is comparatively small.
+- **PR 11 — Legal move enumeration + `hasLegalMove` + game-over
+  detection.** Correct by construction once PR 10 lands. Foundation
+  for puzzle Tier 1's generator/classifier and every future bot.
+- **PR 12 — Crossing detection integrated into engine rules,** reusing
+  the geometry primitives that already exist from v0.7
+  (`crossingDetection.js`) — their fit against the new corner/
+  placement vocabulary is an assumption to verify at design time, not
+  an assumed drop-in. → **v1.0 declared.**
 
 ---
 
