@@ -34,13 +34,14 @@
    between the two original endpoints.
 
    Depends on: selectionState.js, boardView.js, engine/rules.js,
-               constants.js
+               constants.js, pathGeometry.js
    ================================================================ */
 
 import SelectionState from './selectionState.js';
 import BoardView from './boardView.js';
 import { playerForMove, isExhausted } from './engine/rules.js';
 import { DOT_RADIUS } from './constants.js';
+import { arcLengthSplit } from './pathGeometry.js';
 
 const Renderer = (() => {
 
@@ -361,46 +362,19 @@ const Renderer = (() => {
  * Exported standalone so ui.js can use it when placing a new sprout
  * dot on a freshly-drawn curve.
  *
+ * Thin wrapper over pathGeometry.js's arcLengthSplit — kept as a
+ * separate export (rather than inlining arcLengthSplit calls at
+ * every call site) so placement and PR 9's angle resolution always
+ * agree on where the split point is; there is exactly one arc-length
+ * walk in the codebase, not two that could quietly drift apart.
+ *
  * @param {Array<{x:number, y:number}>} points
  * @returns {{x:number, y:number}}
  */
 export function pathMidpoint(points) {
   if (!points || points.length === 0) return { x: 0, y: 0 };
   if (points.length === 1) return points[0];
-
-  // Compute cumulative segment lengths.
-  const segmentLengths = [];
-  let totalLength = 0;
-  for (let i = 0; i < points.length - 1; i++) {
-    const dx = points[i + 1].x - points[i].x;
-    const dy = points[i + 1].y - points[i].y;
-    const len = Math.hypot(dx, dy);
-    segmentLengths.push(len);
-    totalLength += len;
-  }
-
-  if (totalLength === 0) return points[0];
-
-  // Walk segments until we reach half the total arc length.
-  const halfLength = totalLength / 2;
-  let accumulated = 0;
-  for (let i = 0; i < segmentLengths.length; i++) {
-    const segLen = segmentLengths[i];
-    if (accumulated + segLen >= halfLength) {
-      const remaining = halfLength - accumulated;
-      const t = segLen === 0 ? 0 : remaining / segLen;
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      return {
-        x: p1.x + (p2.x - p1.x) * t,
-        y: p1.y + (p2.y - p1.y) * t,
-      };
-    }
-    accumulated += segLen;
-  }
-
-  // Fallback (shouldn't be reached): last point.
-  return points[points.length - 1];
+  return arcLengthSplit(points).point;
 }
 
 export default Renderer;

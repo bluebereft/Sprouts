@@ -743,6 +743,82 @@ not plumbing.
 
 ---
 
+**PR 9 — Wire real corner resolution into the browser (v1.0).**
+✅ **COMPLETE.** Objective: replace `ui.js`'s hardcoded corner-0
+placeholder (PR 4/PR 8 stopgap) at the real commit path with actual
+corners resolved from the drawn curve's geometry against each
+endpoint's existing edges, using `js/cornerResolution.js` (built at
+PR 4, unwired until now).
+
+Two new pure/bridging modules, following the project's existing
+zero-game-knowledge geometry module pattern (`pathSimplify.js`,
+`crossingDetection.js`):
+- `js/pathGeometry.js` — `departureAngle(points, end)` (a curve's
+  angle at one endpoint) and `arcLengthSplit(points)` (the
+  arc-length midpoint PLUS its two departure tangents — always
+  exactly π apart, since splitting a smooth curve at an interior
+  point creates no new bend).
+- `js/cornerGeometry.js` — the actual bridge PR 4's scope note
+  deferred ("does NOT extract real angles from boardView.js... NOT
+  wired into ui.js"). `existingAngles(state, dotId, getEdgePath)`
+  walks `state.rotations[dotId]` (already in σ order, which
+  `resolveCornerIndex` requires) and, per dart, resolves its angle
+  from whichever stored path created it — using dart parity
+  (`d % 2`, per `darts.js`'s pinned convention) to tell whether the
+  dart's origin is the move's ORIGINAL endpoint or its SPROUT.
+  `resolveMoveCorners(...)` calls this for both endpoints of a move
+  about to be committed and resolves against the just-drawn curve's
+  own two departure angles.
+
+**Key structural fact relied on, verified against the reducer (not
+assumed):** `edges[k].a` is always the pre-existing endpoint of the
+move that created edge k, `edges[k].b` is always that move's sprout
+— and every move creates exactly 2 edges at array positions
+`[2·moveIndex, 2·moveIndex+1]` (`firstEdgeIndex = state.edges.length`,
+always 2·moveIndex since edges only ever grow by 2). This lets
+`cornerGeometry.js` go from an edge index straight to "start-side or
+end-side" with no search.
+
+**`renderer.js`'s `pathMidpoint` refactored** to call
+`arcLengthSplit(...).point` rather than re-implement the arc-length
+walk — single source of truth, so sprout *placement* and PR 9's
+*angle resolution* can never independently drift apart on where the
+split point is. Verified byte-identical output on a known fixture
+before and after (a corner-boundary case, arc length landing exactly
+on a bend).
+
+**Real finding, worth recording:** a self-loop is only ever legal on
+a degree-0 or degree-1 dot (needs 2 fresh darts, max degree 3), and
+`resolveCornerIndex` always returns corner 0 for degree ≤ 1
+regardless of the new angle (only one gap exists). Consequence: for
+every legal self-loop, both `startCorner` and `endCorner` **must**
+resolve to 0 — a structural fact of the lives rule intersecting the
+corner-indexing scheme, not a coincidence of any particular fixture.
+Test added to record this explicitly rather than let it be
+rediscovered by surprise later.
+
+**Scope fence held:** no engine files touched (`rules.js`,
+`reducer.js`, `regions.js`, `containment.js` all untouched — verified
+via `git status`). The self-loop pre-tap shortcut in `ui.js`
+(`SelectionState`'s second-tap branch) deliberately KEEPS its
+corner-0 placeholder — it fires before any curve is drawn, so there
+is no real departure angle yet to resolve; it remains a
+responsiveness pre-check only, `Engine.apply`'s real validation at
+`commitMove()` is unaffected and is where real corners now apply.
+`placement` remains `null` (PR 10's job).
+
+Tests: 2 new files, `tests/pathGeometry.test.js` (8 tests) and
+`tests/cornerGeometry.test.js` (7 tests) — all hand-derived-angle
+fixtures, no DOM/boardView, same testability discipline as
+`cornerResolution.test.js`. 186/186 tests passing (171 prior + 15
+new). No engine test needed changes — no engine files touched.
+
+**Residual limitation, explicit:** still no browser/DOM test
+infrastructure (same PR 4 scope cut). The pure geometry and the
+engine-state bridging are fully tested headlessly; the actual
+wiring into a real pointer-drag gesture in the browser has not been
+exercised automatically and needs a manual playtest.
+
 ## Open items carried
 
 1. ~~**O-Q1 ruling**~~ — resolved (Jared): v1 Game Records dropped

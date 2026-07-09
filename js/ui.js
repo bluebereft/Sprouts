@@ -38,7 +38,8 @@
    All human-readable strings live here.
 
    Depends on: selectionState.js, boardView.js, renderer.js,
-               drawInteraction.js, engine/, constants.js
+               drawInteraction.js, engine/, constants.js,
+               cornerGeometry.js
    ================================================================ */
 
 import { createMove } from './engine/move.js';
@@ -49,6 +50,7 @@ import SelectionState from './selectionState.js';
 import BoardView from './boardView.js';
 import Renderer, { pathMidpoint } from './renderer.js';
 import * as DrawInteraction from './drawInteraction.js';
+import { resolveMoveCorners } from './cornerGeometry.js';
 
 // Local mapping from engine violation codes to player-facing text.
 // This is deliberately the UI's job — the engine only emits codes,
@@ -184,6 +186,15 @@ const UI = (() => {
       // Without this, EVERY move would be rejected the moment the
       // reducer requires real corners; this keeps play working while
       // real resolution remains future work.
+      //
+      // PR 9: this specific call site STILL uses the placeholder,
+      // deliberately — it fires on the second TAP, before any curve
+      // has been drawn, so there is no real departure angle yet to
+      // resolve against. It is a responsiveness pre-check only (is
+      // a self-loop even possible from this dot at all — e.g. enough
+      // lives), not the move that gets committed. commitMove() below
+      // is where the actually-drawn curve's real corners are
+      // resolved and is what Engine.apply ultimately validates.
       const candidateMove = createMove(clickedId, clickedId, 0, 0);
       const validation = Engine.validate(candidateMove);
 
@@ -244,9 +255,13 @@ const UI = (() => {
     const moveIndex    = engineStateBefore.moves.length;
     const actingPlayer = playerForMove(moveIndex, engineStateBefore.startingPlayer ?? 0);
 
-    // v0.9.4 PR 8: corner-0 is a documented placeholder — see the
-    // self-loop shortcut above for why it's needed and what it costs.
-    const move = createMove(a, b, 0, 0);
+    // PR 9 (v1.0): real corner resolution, replacing the PR 4/PR 8
+    // corner-0 placeholder — resolved from the actually-drawn
+    // curve's geometry against each endpoint's existing edges.
+    const { startCorner, endCorner } = resolveMoveCorners(
+      engineStateBefore, a, b, path, BoardView.getEdgePath
+    );
+    const move = createMove(a, b, startCorner, endCorner);
     const result = Engine.apply(move);
 
     if (!result.ok) {

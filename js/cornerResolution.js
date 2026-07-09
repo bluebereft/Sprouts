@@ -13,11 +13,10 @@
    Scope decision (PR 4 design review): this module contains ONLY
    the pure angle→index algorithm, fully testable under Node with
    synthetic angle data. It does NOT extract real angles from
-   boardView.js's dot positions/edge paths, and is NOT wired into
-   ui.js's commitMove. That integration needs real browser/DOM
-   testing infrastructure this project doesn't have yet; shipping it
-   untested would violate the project's core testing discipline.
-   This is a deliberate scope cut, not an oversight — see the PR 4
+   boardView.js's dot positions/edge paths — that bridging work is
+   js/cornerGeometry.js's job (PR 9, v1.0), which wires this module's
+   output into ui.js's commitMove.
+   This was a deliberate scope cut, not an oversight — see the PR 4
    design notes in docs/migration-plan.md.
 
    Depends on: nothing. Pure function of angles (radians).

@@ -525,14 +525,18 @@ legality) is complete and merged through PR 8 / v0.9.4. What's left to
 reach "fully playable" is **not** migration cleanup — it's real
 feature gaps, sequenced as follows (agreed July 2026):
 
-- **PR 9 — Wire real corner resolution into the browser.** `ui.js`
-  currently passes a hardcoded corner-0 placeholder on every move
-  (PR 4/PR 8 stopgap); `js/cornerResolution.js` was built and tested
-  at PR 4 but never wired in. Until this lands, the browser can
-  silently resolve a drawn move to the wrong corner on any dot with
-  degree ≥ 2. Small, self-contained — mostly plumbing, no new game
-  logic. Done first so the harder PR below can be manually verified
-  in-browser as it's built, not just via headless tests.
+- **PR 9 — Wire real corner resolution into the browser.** ✅
+  **COMPLETE** — `ui.js`'s commit path now resolves real corners via
+  the new `js/cornerGeometry.js` bridge, using `js/cornerResolution.js`
+  (built at PR 4) against curve geometry from `js/pathGeometry.js`
+  (new). 186/186 tests passing (171 prior + 15 new). See
+  docs/migration-plan.md for the full record, including a real
+  finding: self-loops are structurally confined to degree ≤ 1
+  vertices, so their corners always resolve to 0 by necessity — not
+  a bug, a consequence of the lives rule. Residual, explicit: no
+  browser/DOM test infrastructure exists (same PR 4 scope cut), so
+  the actual pointer-drag wiring needs a manual playtest, not yet
+  done.
 - **PR 10 — Nonempty-K placement (enclosure / nested containment).**
   The biggest remaining gap: PR 5's containment layer only handles
   root-merges and K=∅ splits (spec-documented restriction); any move
