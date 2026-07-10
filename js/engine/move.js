@@ -59,15 +59,22 @@
  * @param {number} endDotId         - second endpoint dot id
  * @param {?number} [startCorner=null] - corner index at startDotId (see file header for convention)
  * @param {?number} [endCorner=null]   - corner index at endDotId
- * @param {?object} [placement=null]   - spec's π; MUST be null/empty in this version
- * @returns {{ startDotId: number, endDotId: number, startCorner: ?number, endCorner: ?number, placement: ?object }}
+ * @param {?object} [placement=null]   - spec's π: occupantRep → 1|2. Domain must equal K (PR 10).
+ * @param {?number} [exteriorSide=null] - for a split of the plane's
+ *   outer region, which of the two descendant sides (1 or 2) is the
+ *   unbounded / ⊥-adjacent one. Occupants placed there stay roots
+ *   (parentAnchor ⊥) rather than becoming nested, keeping the
+ *   encoding canonical (PR 10, Option 1). null when not a
+ *   ⊥-region split (K = ∅, merges, interior splits).
+ * @returns {{ startDotId: number, endDotId: number, startCorner: ?number, endCorner: ?number, placement: ?object, exteriorSide: ?number }}
  */
 export function createMove(
   startDotId,
   endDotId,
   startCorner = null,
   endCorner = null,
-  placement = null
+  placement = null,
+  exteriorSide = null
 ) {
-  return { startDotId, endDotId, startCorner, endCorner, placement };
+  return { startDotId, endDotId, startCorner, endCorner, placement, exteriorSide };
 }

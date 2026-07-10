@@ -34,13 +34,17 @@
        search: index 2*moveIndex is start-side, 2*moveIndex+1 is
        end-side.
 
-   Depends on: engine/darts.js (edgeOfDart), pathGeometry.js,
-               cornerResolution.js.
+   Depends on: engine/darts.js (edgeOfDart), engine/faces.js,
+               engine/containment.js (computeK), pathGeometry.js,
+               cornerResolution.js, regionGeometry.js.
    ================================================================ */
 
 import { edgeOfDart } from './engine/darts.js';
 import { departureAngle, arcLengthSplit } from './pathGeometry.js';
 import { resolveCornerIndex } from './cornerResolution.js';
+import { traceFaces, getComponents, cornerFace } from './engine/faces.js';
+import { computeK } from './engine/containment.js';
+import { partitionByEnclosure } from './regionGeometry.js';
 
 /**
  * Computes the departure angle of a single dart, using whichever
@@ -118,4 +122,76 @@ export function resolveMoveCorners(state, startDotId, endDotId, path, getEdgePat
   const endCorner    = resolveCornerIndex(endExisting, departureAngle(path, 'end'));
 
   return { startCorner, endCorner };
+}
+
+/**
+ * Resolves a split move's placement π and exteriorSide from the
+ * drawn curve's geometry (PR 10). Only meaningful for a move that
+ * splits a region containing occupant components (K ≠ ∅); returns
+ * empty placement / null exteriorSide otherwise, so the ordinary
+ * (non-enclosing) case is unaffected.
+ *
+ * Convention (self-consistent by construction — see the reducer's
+ * updateContainmentForSplit): side 2 is declared the exterior
+ * (⊥-adjacent) side. Occupants the drawn loop ENCLOSES go to the
+ * interior, side 1 (→ nested); occupants OUTSIDE the loop go to
+ * side 2 (→ stay roots). The engine's σ-based side ordering decides
+ * which physical face is called side 1, but that choice is
+ * immaterial: interior occupants are nested into a genuine bounded
+ * face either way, which is exactly what enclosing them means.
+ *
+ * This is only invoked for a self-loop split (startDotId ===
+ * endDotId). A non-loop move is a merge (no K); a same-component
+ * cross-face move is illegal upstream (DIFFERENT_REGIONS). For a
+ * split whose corners differ, the same enclosure logic applies —
+ * the loopPath is still the drawn curve bounding the enclosed area.
+ *
+ * @param {object} state — engine state BEFORE the move
+ * @param {number} startDotId
+ * @param {number} endDotId
+ * @param {number} startCorner — resolved corner (from resolveMoveCorners)
+ * @param {number} endCorner
+ * @param {Array<{x:number,y:number}>} path — the drawn curve
+ * @param {(dotId:number) => ?{x:number,y:number}} getDotPosition
+ * @returns {{ placement: object, exteriorSide: ?number }}
+ */
+export function resolveMovePlacement(
+  state, startDotId, endDotId, startCorner, endCorner, path, getDotPosition
+) {
+  const faces = traceFaces(state.edges, state.rotations);
+  const startFace = cornerFace(state.edges, state.rotations, faces, startDotId, startCorner);
+  const endFace   = cornerFace(state.edges, state.rotations, faces, endDotId, endCorner);
+
+  // Only a split (same face on both corners) can enclose occupants.
+  if (startFace !== endFace) {
+    return { placement: {}, exteriorSide: null };
+  }
+
+  const dotIds = state.dots.map(d => d.id);
+  const components = getComponents(state.edges, dotIds);
+  const touched = components.find(members => members.includes(startDotId));
+  const rep = touched[0];
+
+  const K = computeK(faces, state.parentAnchor, startFace, rep, state.outerFaceAnchor);
+  if (K.length === 0) {
+    return { placement: {}, exteriorSide: null };
+  }
+
+  // Each occupant rep is named by its representative vertex id; use
+  // that vertex's screen position as the test point. (A component's
+  // representative is a real vertex — spec §10.2 — so it always has
+  // a position once drawn.)
+  const candidates = K
+    .map(occRep => ({ id: occRep, point: getDotPosition(occRep) }))
+    .filter(c => c.point != null);
+
+  const { inside } = partitionByEnclosure(path, candidates.map(c => ({ id: c.id, point: c.point })));
+  const insideSet = new Set(inside);
+
+  const placement = {};
+  for (const occRep of K) {
+    placement[occRep] = insideSet.has(occRep) ? 1 : 2; // inside→interior(1), outside→exterior(2)
+  }
+
+  return { placement, exteriorSide: 2 };
 }

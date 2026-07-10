@@ -278,8 +278,9 @@ Proposition 7.4 there is no such thing as an illegal placement.
 
 For every legal corner pair and every π : K → {1, 2}, some drawing of
 the curve realizes π — occupant subtrees are freely rearrangeable
-within a region. Status: argued informally; verification is proof
-obligation P-O4.
+within a region. Status: argued informally; discharged by exhaustive
+small-case enumeration at PR 10 (P-O4) and cross-checked against
+Čížek & Balko's single-boundary-move partition.
 
 ### 7.5 Serialization
 
@@ -373,6 +374,8 @@ invariants (§9.2).
 - **I-7 Total lives.** Decreases by exactly 1 per applied Move (the
   existing v0.6 invariant, re-asserted here).
 - **I-8 π-domain exactness** (Move-level, in `validateMove`): §7.3.
+  Implemented at PR 10 (`PLACEMENT_DOMAIN_MISMATCH`): a split's π must
+  have domain exactly K, values in {1,2}. No longer deferred.
 
 Note: earlier drafts included a "sibling mutual exteriority" check.
 It is dropped as vacuous — the anchors *define* the nesting, so there
@@ -478,9 +481,17 @@ implementation review (arXiv:2108.07671 including its appendix):
   flip at the containment layer once the outer face is known, not
   built into the tracer.
 - **P-O4.** Placement freeness (Prop. 7.4): verify against the
-  literature or by exhaustive small-case enumeration.
+  literature or by exhaustive small-case enumeration. **Discharged at
+  PR 10:** the P-O2 exhaustive walker now generates every placement ×
+  exterior-side choice for enclosure moves up to depth 2 and confirms
+  every one yields a containment-sound state — the "some drawing
+  realizes π" claim, checked by construction across all small cases.
+  Cross-checked against Čížek & Balko's single-boundary-move analysis
+  (their major/minor partition = our π).
 - **P-O5.** Corner-index serialization round-trips under replay.
-  Blocks Game Record formatVersion 2, not v0.9.2 itself.
+  Blocks Game Record formatVersion 2, not v0.9.2 itself. **Discharged
+  at PR 8** (corners) and **extended at PR 10** (placement +
+  exteriorSide now round-trip too).
 
 ## 12. Open questions
 

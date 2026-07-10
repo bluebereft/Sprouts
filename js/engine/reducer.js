@@ -86,7 +86,7 @@
    ================================================================ */
 
 import { traceFaces, getComponents, cornerFace } from './faces.js';
-import { updateContainmentForMerge, updateContainmentForSplit } from './containment.js';
+import { updateContainmentForMerge, updateContainmentForSplit, computeK } from './containment.js';
 
 /**
  * Applies a move to the current game state and returns a new state.
@@ -242,10 +242,19 @@ export function applyMove(state, move) {
   if (isSplit) {
     const touchedComponent = componentsBefore.find(members => members.includes(startDotId));
     const rep = touchedComponent[0];
+    // K is computed against the OLD face being split, using the OLD
+    // anchors — the occupants as they stood before this move. The
+    // outerFaceAnchor argument enables computeK's ⊥ (plane's outer
+    // region) branch (PR 10), so sibling roots are seen as occupants
+    // when the shared outer region is split.
+    const K = computeK(oldFaces, state.parentAnchor, startFace, rep, state.outerFaceAnchor);
+    const placement = move.placement || {};
+    const exteriorSide = (move.exteriorSide === undefined) ? null : move.exteriorSide;
     ({ outerFaceAnchor: newOuterFaceAnchor, parentAnchor: newParentAnchor } =
       updateContainmentForSplit(
         state.outerFaceAnchor, state.parentAnchor, rep,
-        oldFaces, startFace, newFaces, newDartsForThisMove
+        oldFaces, startFace, newFaces, newDartsForThisMove,
+        K, placement, exteriorSide
       ));
   } else {
     const startComponent = componentsBefore.find(members => members.includes(startDotId));

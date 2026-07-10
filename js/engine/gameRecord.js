@@ -181,6 +181,7 @@ export function exportGame(state) {
       startCorner: m.startCorner ?? null,
       endCorner:   m.endCorner ?? null,
       placement:   m.placement ?? null,
+      exteriorSide: m.exteriorSide ?? null,
     })),
   };
 }
@@ -228,6 +229,7 @@ export function importGame(record) {
       startCorner: m.startCorner ?? null,
       endCorner:   m.endCorner ?? null,
       placement:   m.placement ?? null,
+      exteriorSide: m.exteriorSide ?? null,
     };
 
     const validation = validateMove(state, move);

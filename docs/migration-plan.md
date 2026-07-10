@@ -706,7 +706,14 @@ structural checks while producing a position mismatched with the
 paper's specific labelling. *Mitigate:* resolve against a hand-traced
 case where the outer face is unambiguous by construction (e.g. a
 single bounded region with one occupant), pin it in the spec, then
-let PR 5's oracle tests hold it fixed.
+let PR 5's oracle tests hold it fixed. **Resolved at PR 10:** the
+enclosure work made the outer-face choice concrete via the Move's
+`exteriorSide` field — which side of a ⊥-region split remains
+unbounded is now supplied by the drawing (geometrically) rather than
+guessed from σ, so occupants outside a loop stay roots and occupants
+inside nest, with no mirror-image ambiguity. The residual "which dart
+names a face" freedom is a canonicalisation concern (Phase 2), not an
+orientation-correctness one.
 
 **R3 — v1 replay compatibility (migration).** v1 records lack
 corners; degree-2 replay is ambiguous (spec O-Q1). *Mitigate:* the
@@ -820,6 +827,97 @@ wiring into a real pointer-drag gesture in the browser has not been
 exercised automatically and needs a manual playtest.
 
 ## Open items carried
+
+**PR 10 — Nonempty-K placement / enclosure (v1.0).** ✅ **COMPLETE.**
+The biggest remaining feature gap: moves that enclose other
+components (looping a line around other dots) were silently accepted
+by the engine without registering the enclosure. Fixed end-to-end,
+engine + browser (Option B, one PR — Jared's call).
+
+*Literature check first (house rule):* re-read Čížek & Balko
+(arXiv:2108.07671, §3 + the single-boundary-move section). It
+independently confirms our spec §7.2–§8.2: a split partitions the
+region's other occupants into two sides ("major"/"minor" in their
+terms), and that partition is NOT derivable from graph combinatorics
+— it needs the drawn geometry. This validated the existing
+placement/π mechanism (built at PR 4, empty until now) as the right
+design; nothing needed re-architecting.
+
+*Root cause found (verified by direct probe, not assumed):* the
+enclosure bug lived in `computeK`. It only saw occupants whose
+`parentAnchor` resolved to a real face; sibling ROOT components
+(parentAnchor ⊥ / null) sharing the plane's outer region were
+invisible to it. Fix: `computeK` gained an optional `outerFaceAnchor`
+argument; when the host face is a root's own outer face (the
+⊥-adjacent region being split), every other root is included in K
+(spec D4: the plane's outer region is bounded by all roots' outer
+walks). `getBoundariesForRegion` shared this latent bug and is fixed
+for free.
+
+*Engine changes:*
+- `computeK` — ⊥ handling as above.
+- `updateContainmentForSplit` — now redistributes occupant subtrees
+  in K to the two descendant sides per placement π; K = ∅ still works
+  (loop runs zero times). New `splitDescendantFaces` helper pins the
+  deterministic side-1/side-2 ordering (by smallest dart) that π and
+  the browser geometry both agree on.
+- `rules.js` — the blanket `NONEMPTY_K_NOT_YET_SUPPORTED` rejection is
+  replaced by real domain-exactness validation (spec §7.3: dom(π) = K,
+  values in {1,2}), emitted as the new `PLACEMENT_DOMAIN_MISMATCH`.
+  I-8 is now genuinely checked, not deferred.
+- `move.js` / `gameRecord.js` — a `Move` gained `exteriorSide` (see
+  below), appended as the 6th positional field (safe: no middle-shift,
+  unlike PR 8's regionId removal) and serialized in the Game Record.
+
+*Design decision surfaced mid-implementation and resolved by Jared
+(Option 1):* a split of the plane's outer region produces one bounded
+face and one still-⊥-adjacent face. An occupant placed on the
+exterior side is topologically still a root and MUST keep
+`parentAnchor = ⊥`, or two encodings of the same position would
+differ and break canonicalisation (Phase 2). Rather than defer this
+to the canonicaliser, the Move now carries `exteriorSide` (which of
+the two sides is unbounded), derived geometrically at the same time
+as π; occupants on that side stay roots. Keeps "roots have ⊥" true at
+all times.
+
+*Browser half (Option B):*
+- `js/regionGeometry.js` (new, pure) — `pointInPolygon`,
+  `partitionByEnclosure`, `signedArea`. Even-odd ray casting; zero
+  game knowledge, same discipline as `pathGeometry.js`.
+- `js/cornerGeometry.js` — new `resolveMovePlacement(...)`: computes K,
+  partitions occupants by whether the drawn loop encloses their
+  representative vertex's screen position, and emits π (inside →
+  interior side 1, outside → exterior side 2) with `exteriorSide = 2`.
+  Self-consistent by construction (verified: whichever side is
+  declared exterior, the reducer nests the other side's occupants
+  into a genuine bounded face and invariants hold).
+- `ui.js` `commitMove` — now calls `resolveMovePlacement` and passes
+  real π + exteriorSide on every committed move.
+
+*Tests:* `computeK` ⊥ branch, `splitDescendantFaces`,
+`updateContainmentForSplit` redistribution + exterior-root
+normalisation (containment.test.js, +7); `regionGeometry.test.js`
+(+6, pure point-in-polygon incl. a non-convex L-shape); enclosure
+resolution end-to-end (cornerGeometry.test.js, +3). The P-O2
+exhaustive walker (regions.test.js) now GENERATES enclosure moves —
+every placement × exterior-side choice — so invariants are checked
+after every reachable enclosure outcome up to depth 2, not just K = ∅.
+Five existing tests updated for the behaviour change (old
+NONEMPTY_K rejection test rewritten as domain-exactness; gameRecord
+fixtures/round-trips carry the new field; P-O5 strengthened to
+round-trip placement + exteriorSide). 202/202 passing.
+
+*Residual limitations (explicit):* (1) MERGE still handles only two
+ROOT components — merging a nested component or one carrying its own
+occupants isn't exercised (doesn't arise from current browser moves;
+left for PR 11 enumeration to surface). (2) Full canonicalisation of
+which dart names a face is still Phase 2's job — PR 10 guarantees
+exterior occupants are ⊥, not that two drawings of the same enclosure
+pick identical darts. (3) No browser/DOM test harness still (same PR 4
+cut) — the point-in-polygon logic and the engine bridge are tested
+headlessly; the live pointer-drag needs a manual playtest.
+
+## Historic open items carried
 
 1. ~~**O-Q1 ruling**~~ — resolved (Jared): v1 Game Records dropped
    entirely, no migration path. See PR 8 / v0.9.4.

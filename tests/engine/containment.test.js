@@ -6,10 +6,10 @@
    directly, not via applyMove(), so a coordinated bug between the
    reducer and this module can't slip through unnoticed.
 
-   Reminder of the PR 5 scope restriction (see containment.js's file
-   header): merge is only verified for two ROOT components with no
-   occupants; split is only verified for K = ∅. These tests exercise
-   exactly that restricted scope, not the general (nested) case.
+   Reminder (PR 10 update): merge is still verified only for two ROOT
+   components; split now covers NON-EMPTY K (enclosure) as well as
+   K = ∅. The PR 10 tests at the end of this file exercise the
+   enclosure path directly with hand-built fixtures.
    ================================================================ */
 
 import { test } from 'node:test';
@@ -19,6 +19,7 @@ import {
   resolveOuterFaceAnchor,
   resolveParentAnchor,
   computeK,
+  splitDescendantFaces,
   updateContainmentForMerge,
   updateContainmentForSplit,
   checkContainmentInvariants,
@@ -248,4 +249,115 @@ test('checkContainmentInvariants: I-4 catches a parent-chain cycle', () => {
   assert.ok(result.violations.some(
     v => v.rule === ContainmentError.PARENT_UNSOUND || v.rule === ContainmentError.FOREST_CYCLE
   ));
+});
+
+// ── PR 10: enclosure / non-empty K ───────────────────────────────
+//
+// Shared fixture: component 0 is a self-loop — dot 0 with sprout dot
+// 2, joined by two parallel edges (a "bigon"). Its σ:
+//   edges = [{a:0,b:2},{a:0,b:2}]  → darts 0,1 (edge 0), 2,3 (edge 1)
+//   rotations = [[0,2],[],[1,3]]   (dot 0 has darts 0,2; sprout 2 has 1,3)
+// traceFaces gives two faces of component 0: [0,3] and [1,2]
+// (verified by direct traceFaces call, not assumed). Dot 1 is an
+// isolated sibling root sharing the plane's outer region.
+
+const loopEdges = [{ a: 0, b: 2 }, { a: 0, b: 2 }];
+const loopRotations = [[0, 2], [], [1, 3]];
+
+test('computeK: a root sibling sharing the plane\'s outer region IS an occupant when that region is split', () => {
+  const faces = traceFaces(loopEdges, loopRotations);
+  // outerFaceAnchor for component 0 points at face [0,3] (say); dot 1
+  // is an isolated root. parentAnchor: both roots (0 → ⊥, 1 → ⊥).
+  const outerFaceAnchor = { 0: { kind: 'dart', value: 0 }, 1: { kind: 'vertex', value: 1 } };
+  const parentAnchor = { 0: null, 1: null };
+  // Host face = component 0's outer face [0,3] (the one the anchor
+  // resolves to). Splitting the plane's outer region: sibling root 1
+  // must appear in K.
+  const hostFace = faces.find(f => f.darts.includes(0)); // [0,3]
+  const K = computeK(faces, parentAnchor, hostFace, /*excludeRep=*/0, outerFaceAnchor);
+  assert.deepEqual(K, [1]);
+});
+
+test('computeK: without outerFaceAnchor, the ⊥ branch is skipped (backward-compatible)', () => {
+  const faces = traceFaces(loopEdges, loopRotations);
+  const parentAnchor = { 0: null, 1: null };
+  const hostFace = faces.find(f => f.darts.includes(0));
+  // Omitting outerFaceAnchor: roots are never seen as occupants —
+  // matches the pre-PR-10 behaviour exactly (empty K).
+  const K = computeK(faces, parentAnchor, hostFace, 0);
+  assert.deepEqual(K, []);
+});
+
+test('computeK: a genuinely nested occupant is found via its real parentAnchor (unchanged path)', () => {
+  const faces = traceFaces(loopEdges, loopRotations);
+  const hostFace = faces.find(f => f.darts.includes(1)); // [1,2]
+  // Dot 1 nested INSIDE face [1,2] via a real dart anchor (dart 1).
+  const parentAnchor = { 0: null, 1: 1 };
+  const outerFaceAnchor = { 0: { kind: 'dart', value: 0 }, 1: { kind: 'vertex', value: 1 } };
+  const K = computeK(faces, parentAnchor, hostFace, 0, outerFaceAnchor);
+  assert.deepEqual(K, [1]);
+});
+
+test('splitDescendantFaces: returns the two new faces ordered by smallest dart', () => {
+  const faces = traceFaces(loopEdges, loopRotations);
+  // The move's new darts are all four (0..3) here. Both faces of
+  // component 0 contain some of them, so both are descendants.
+  // Ordered by smallest dart: [0,3] (min 0) before [1,2] (min 1).
+  const descendants = splitDescendantFaces(faces, 0, [0, 1, 2, 3]);
+  assert.equal(descendants.length, 2);
+  assert.equal(Math.min(...descendants[0].darts), 0);
+  assert.equal(Math.min(...descendants[1].darts), 1);
+});
+
+test('updateContainmentForSplit: an occupant on the INTERIOR side becomes nested; on the EXTERIOR side stays a root', () => {
+  const oldFaces = traceFaces([], [[], [], []]); // pre-move: 3 isolated dots
+  const newFaces = traceFaces(loopEdges, loopRotations); // post-move
+  // Pre-move anchors: three roots (0,1,2 all ⊥). The split touches
+  // component 0's own (trivial) outer face.
+  const outerFaceAnchor = { 0: { kind: 'vertex', value: 0 }, 1: { kind: 'vertex', value: 1 }, 2: { kind: 'vertex', value: 2 } };
+  const parentAnchor = { 0: null, 1: null, 2: null };
+  const splitFace = oldFaces.find(f => f.component === 0); // dot 0's trivial face
+  // K = {1, 2}; π sends 1 → side 1 (interior), 2 → side 2; exterior
+  // side is 2. Descendants ordered [0,3]=side1, [1,2]=side2.
+  const result = updateContainmentForSplit(
+    outerFaceAnchor, parentAnchor, 0, oldFaces, splitFace, newFaces, [0, 1, 2, 3],
+    /*K=*/[1, 2], /*placement=*/{ 1: 1, 2: 2 }, /*exteriorSide=*/2
+  );
+  // Occupant 1 (interior, side 1) → anchored to side-1 face's dart (0).
+  assert.equal(result.parentAnchor[1], 0);
+  // Occupant 2 (exterior, side 2) → stays a root (⊥ / null).
+  assert.equal(result.parentAnchor[2], null);
+  // Touched component 0 remains a root itself.
+  assert.equal(result.parentAnchor[0], null);
+});
+
+test('updateContainmentForSplit: swapping which abstract side is exterior keeps exterior occupants as roots', () => {
+  const oldFaces = traceFaces([], [[], [], []]);
+  const newFaces = traceFaces(loopEdges, loopRotations);
+  const outerFaceAnchor = { 0: { kind: 'vertex', value: 0 }, 1: { kind: 'vertex', value: 1 }, 2: { kind: 'vertex', value: 2 } };
+  const parentAnchor = { 0: null, 1: null, 2: null };
+  const splitFace = oldFaces.find(f => f.component === 0);
+  // Now occupant 1 → side 2 (interior), occupant 2 → side 1, and the
+  // EXTERIOR is side 1. So occupant 2 stays a root; occupant 1 nests.
+  const result = updateContainmentForSplit(
+    outerFaceAnchor, parentAnchor, 0, oldFaces, splitFace, newFaces, [0, 1, 2, 3],
+    [1, 2], { 1: 2, 2: 1 }, /*exteriorSide=*/1
+  );
+  assert.equal(result.parentAnchor[2], null);     // exterior → root
+  assert.equal(result.parentAnchor[1], 1);         // interior side 2 → dart 1
+});
+
+test('updateContainmentForSplit: K = ∅ still works unchanged (ordinary lone self-loop)', () => {
+  const oldFaces = traceFaces([], [[]]);          // 1 isolated dot
+  const newFaces = traceFaces(loopEdges, loopRotations);
+  const outerFaceAnchor = { 0: { kind: 'vertex', value: 0 } };
+  const parentAnchor = { 0: null };
+  const splitFace = oldFaces.find(f => f.component === 0);
+  const result = updateContainmentForSplit(
+    outerFaceAnchor, parentAnchor, 0, oldFaces, splitFace, newFaces, [0, 1, 2, 3]
+    // no K, placement, or exteriorSide — all default
+  );
+  // Component 0 stays a root; its outer face re-anchors to a descendant.
+  assert.equal(result.parentAnchor[0], null);
+  assert.equal(result.outerFaceAnchor[0].kind, 'dart');
 });

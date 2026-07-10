@@ -17,37 +17,29 @@
    region; spec §3.4 — parentAnchor is NEVER a vertex-token, since an
    isolated vertex cannot be a parent).
 
-   SCOPE RESTRICTION (deliberate, flagged at PR 5 design review —
-   see docs/migration-plan.md's PR 5 entry)
+   SCOPE (updated at PR 10 — enclosure / non-empty K now supported)
    ─────────────────────────────────────────────────────────────────
-   This PR implements and verifies containment updates ONLY for:
-     - MERGE of two components that are BOTH currently roots
-       (parentAnchor === null for both) with no occupants of their
-       own — the ordinary "connect two separate structures" case.
-     - SPLIT of a component's own face when K = ∅ (no occupants) —
-       matching PR 4's existing placement restriction.
-   Nested containment (merging/splitting a component that already
-   has its own occupants) is NOT handled here — a known, documented
-   limitation, not silently assumed away.
+   SPLIT now handles NON-EMPTY K: a move that encloses other
+   components redistributes those occupant subtrees to the two sides
+   of the split per a placement π (spec §7.2). This includes the
+   common real case of looping a line so it encloses other dots,
+   which PR 5 had deliberately deferred. The key enabler is
+   computeK's ⊥ (plane's outer region) handling below: sibling root
+   components sharing the plane's outer region are now correctly seen
+   as occupants when that shared region is split.
 
-   A SECOND, related limitation surfaced by PR 5's own exhaustive
-   test (P-O2, tests/engine/regions.test.js): connecting two corners
-   that are ALREADY in the SAME component but on DIFFERENT faces of
-   it (e.g. a chord between two points on an existing multi-face
-   structure) is neither a clean merge (repA === repB — there's only
-   one component, not two to combine) nor a clean split (the two
-   corners aren't on the same face, so isSplit is false) under the
-   classification this file uses. This case is NOT handled correctly
-   here — calling updateContainmentForMerge with repA === repB
-   produces a syntactically harmless but mathematically meaningless
-   no-op, not a correct containment update. It is excluded by
-   construction from every test in this PR (self-loops always
-   compare a vertex's corner against itself — trivially the same
-   face; cross-component moves are always genuine root merges, since
-   nothing in this restricted universe ever becomes non-root — see
-   the PR 5 implementation review for why these two guarantees
-   together mean the restriction is actually CLOSED under every move
-   reachable so far, not just a narrow slice of it).
+   MERGE is still restricted to two ROOT components (the ordinary
+   "connect two separate structures" case). Merging a component that
+   is itself nested, or that carries its own occupants needing
+   re-parenting, is NOT yet exercised — it does not arise from the
+   move set the browser currently produces. Left for the enumeration
+   work (PR 11) to surface with real cases if it can; recorded as a
+   residual limitation in docs/migration-plan.md rather than silently
+   assumed away.
+
+   Same-component/different-face moves (a "chord") remain rejected
+   upstream in rules.js (DIFFERENT_REGIONS, since PR 7) and so never
+   reach this module — they are illegal, not unhandled.
 
    The functions below trust their preconditions (reducer.js only
    calls them when they apply) rather than defensively checking,
@@ -106,20 +98,63 @@ export function resolveParentAnchor(faces, anchor) {
  * Computes K — the occupant component representatives of a host
  * face, excluding the touched component itself (spec §7.2).
  *
+ * The plane's outer region (⊥) is a special case that MUST be
+ * handled, or enclosure moves silently lose their occupants (the
+ * bug PR 10 fixes): root components have parentAnchor === null,
+ * which resolves to null, never to any face object — so a naive
+ * "resolvedFace === hostFace" test can never see sibling roots
+ * sharing the plane's outer region. Per spec D4, the plane's outer
+ * region is bounded by the outer walks of ALL root components; so
+ * when hostFace is itself a root's OWN outer face (i.e. hostFace is
+ * the ⊥-adjacent face being split), every OTHER root is an occupant
+ * of that shared region. Detecting this requires outerFaceAnchor
+ * (to know whether hostFace is a root's outer face) — passed in for
+ * exactly this. When omitted, the ⊥ branch is skipped and behaviour
+ * is identical to the pre-PR-10 version (used by call sites that
+ * only ever ask about genuinely-nested host faces).
+ *
  * @param {Array<{component:number, darts:number[]}>} faces — a
  *   single traceFaces() result; hostFace MUST be a face object from
  *   this SAME array (compared by reference)
  * @param {object} parentAnchor — state.parentAnchor
  * @param {object} hostFace — the face object occupants are checked against
  * @param {number} excludeRep — the touched component's own representative
+ * @param {?object} [outerFaceAnchor=null] — state.outerFaceAnchor;
+ *   required to detect the ⊥ (plane's outer region) case above
  * @returns {number[]} occupant representatives (as numbers)
  */
-export function computeK(faces, parentAnchor, hostFace, excludeRep) {
+export function computeK(faces, parentAnchor, hostFace, excludeRep, outerFaceAnchor = null) {
   const occupants = [];
+
+  // Is hostFace a ROOT component's own outer face — i.e. is this the
+  // plane's outer region (⊥) being hosted? hostFace.component tells
+  // us which component owns the face; it's the ⊥-adjacent face iff
+  // that component is a root (parentAnchor null) AND hostFace is the
+  // face its outerFaceAnchor resolves to.
+  let hostIsOuterRegion = false;
+  if (outerFaceAnchor) {
+    const hostOwner = hostFace.component;
+    const ownerIsRoot = parentAnchor[hostOwner] === null || parentAnchor[hostOwner] === undefined;
+    if (ownerIsRoot && outerFaceAnchor[hostOwner] !== undefined) {
+      const ownerOuter = resolveOuterFaceAnchor(faces, outerFaceAnchor[hostOwner]);
+      hostIsOuterRegion = ownerOuter === hostFace;
+    }
+  }
+
   for (const key of Object.keys(parentAnchor)) {
     const rep = Number(key);
     if (rep === excludeRep) continue;
-    const resolvedFace = resolveParentAnchor(faces, parentAnchor[key]);
+
+    const anchor = parentAnchor[key];
+
+    if (anchor === null) {
+      // A root. It occupies the host region only when the host IS
+      // the plane's outer region (all roots share ⊥, spec D4).
+      if (hostIsOuterRegion) occupants.push(rep);
+      continue;
+    }
+
+    const resolvedFace = resolveParentAnchor(faces, anchor);
     if (resolvedFace === hostFace) {
       occupants.push(rep);
     }
@@ -163,16 +198,50 @@ export function updateContainmentForMerge(outerFaceAnchor, parentAnchor, repA, r
 }
 
 /**
- * Containment update for a SPLIT (single-boundary move) — spec
- * §8.2. RESTRICTED to K = ∅ (see file header). Trusts this
- * precondition; does not verify it.
+ * The two new faces descending from a split, in a DETERMINISTIC
+ * order: index 0 is the face whose smallest dart is smaller. This
+ * ordering is the shared "side 1 / side 2" convention that both the
+ * containment update and any placement π (spec §7.2) MUST agree on:
+ * an occupant π-assigned to side 1 is re-anchored into descendants
+ * [0], side 2 into descendants[1]. The browser's geometric π
+ * derivation (js/regionGeometry.js) uses the SAME ordering so a
+ * drawn move and its recorded π never disagree about which side is
+ * which.
  *
- * The component's own representative never changes on a split (no
- * merge occurs). parentAnchor[rep] never changes either — a split
- * only restructures the component's OWN internal faces; its
- * relationship to its parent (if any) is untouched. Only
- * outerFaceAnchor[rep] might need updating, and only if the face
- * that split was the one outerFaceAnchor was pointing to.
+ * @param {Array<{component:number, darts:number[]}>} newFaces
+ * @param {number} rep
+ * @param {number[]} newDarts
+ * @returns {Array<{component:number, darts:number[]}>} exactly 2 faces
+ */
+export function splitDescendantFaces(newFaces, rep, newDarts) {
+  const descendants = newFaces.filter(
+    f => f.component === rep && newDarts.some(d => f.darts.includes(d))
+  );
+  return descendants.slice().sort(
+    (a, b) => Math.min(...a.darts) - Math.min(...b.darts)
+  );
+}
+
+/**
+ * Containment update for a SPLIT (single-boundary move) — spec
+ * §8.2. Now handles NON-EMPTY K (PR 10): occupant subtrees named in
+ * K are re-anchored to whichever descendant face the placement π
+ * assigns them. K = ∅ is the ordinary common case and still works
+ * (the K loop simply runs zero times).
+ *
+ * The touched component's own representative never changes on a
+ * split (no merge occurs). parentAnchor[rep] never changes either —
+ * a split only restructures the component's OWN internal faces; its
+ * relationship to its OWN parent (if any) is untouched. What CAN
+ * change: (a) outerFaceAnchor[rep], if the split face was the one it
+ * pointed to; (b) parentAnchor of each occupant in K, which now
+ * points into one of the two descendant faces.
+ *
+ * Subtrees move rigidly (spec §7.2): only a subtree's ROOT is
+ * re-anchored here; its descendants keep their own parentAnchors,
+ * which point at faces inside the subtree root and are unaffected by
+ * where the root sits. So nested multi-level occupants need no
+ * special handling.
  *
  * @param {object} outerFaceAnchor
  * @param {object} parentAnchor
@@ -184,37 +253,59 @@ export function updateContainmentForMerge(outerFaceAnchor, parentAnchor, repA, r
  * @param {Array<{component:number, darts:number[]}>} newFaces —
  *   traceFaces() result AFTER the move
  * @param {number[]} newDarts — the 4 dart ids this move created
+ * @param {number[]} [K=[]] — occupant reps to redistribute
+ * @param {object} [placement={}] — π: occupantRep → 1 | 2
+ * @param {?number} [exteriorSide=null] — when this splits the plane's
+ *   outer region, which side (1 or 2) is the unbounded / ⊥-adjacent
+ *   one (PR 10, Option 1). Occupants π-assigned to that side stay
+ *   roots (parentAnchor ⊥ / null) instead of becoming nested, and
+ *   the touched component's outerFaceAnchor is pointed at that side.
+ *   null when the geometric exterior isn't known/relevant (K = ∅,
+ *   interior splits, merges) — then the legacy arbitrary rule applies.
  * @returns {{ outerFaceAnchor: object, parentAnchor: object }}
  */
-export function updateContainmentForSplit(outerFaceAnchor, parentAnchor, rep, oldFaces, splitFace, newFaces, newDarts) {
+export function updateContainmentForSplit(
+  outerFaceAnchor, parentAnchor, rep, oldFaces, splitFace, newFaces, newDarts,
+  K = [], placement = {}, exteriorSide = null
+) {
   const oldOuterFace = resolveOuterFaceAnchor(oldFaces, outerFaceAnchor[rep]);
   const outerFaceWasSplit = oldOuterFace === splitFace;
 
-  const newParentAnchor = { ...parentAnchor }; // never changes on a split (see header)
+  const descendants = splitDescendantFaces(newFaces, rep, newDarts);
+  // descendants[0] = side 1, descendants[1] = side 2 (see
+  // splitDescendantFaces). A dart on each side, for anchoring.
+  const sideDart = [descendants[0].darts[0], descendants[1].darts[0]];
 
-  if (!outerFaceWasSplit) {
-    // outerFaceAnchor still correctly resolves to its old (unchanged)
-    // face — nothing to do.
-    return { outerFaceAnchor: { ...outerFaceAnchor }, parentAnchor: newParentAnchor };
+  const newParentAnchor = { ...parentAnchor };
+
+  // Re-anchor each occupant subtree root to the side π assigns it.
+  // EXCEPTION (Option 1): an occupant assigned to the known exterior
+  // (⊥-adjacent) side is topologically still a root in the plane, so
+  // it keeps parentAnchor ⊥ (null) rather than being anchored into
+  // the touched component's exterior face — otherwise two encodings
+  // of the same position would differ (breaks canonicalisation).
+  for (const occRep of K) {
+    const side = placement[occRep]; // 1 or 2
+    if (exteriorSide !== null && side === exteriorSide) {
+      newParentAnchor[occRep] = null; // stays a root (⊥)
+    } else {
+      newParentAnchor[occRep] = sideDart[side - 1];
+    }
   }
 
-  // The two new faces descending from the split: this component's
-  // faces (post-move) that contain any of the move's new darts.
-  const descendants = newFaces.filter(
-    f => f.component === rep && newDarts.some(d => f.darts.includes(d))
-  );
-
-  // Deterministic but arbitrary choice of which becomes the new
-  // outer face (P-O3, revised at PR 3: orientation isn't tracer-
-  // decidable; since K = ∅, nothing currently distinguishes the two
-  // faces functionally, so any fixed, documented rule is valid).
-  // Rule: the one whose smallest dart is smaller.
-  const newOuterFace = descendants.reduce((a, b) =>
-    Math.min(...a.darts) <= Math.min(...b.darts) ? a : b
-  );
-
+  // outerFaceAnchor[rep]: only changes if the split face was the one
+  // it pointed to. When it was, point it at the descendant that is
+  // the component's true outer face: the exterior side when known,
+  // else the fixed "smaller smallest-dart" rule (descendants[0]) —
+  // an arbitrary-but-deterministic choice retained for the cases
+  // where the geometric exterior isn't supplied (P-O3: which side is
+  // ⊥ isn't tracer-decidable from σ alone; when K = ∅ it also makes
+  // no containment difference).
   const newOuterFaceAnchor = { ...outerFaceAnchor };
-  newOuterFaceAnchor[rep] = { kind: 'dart', value: newOuterFace.darts[0] };
+  if (outerFaceWasSplit) {
+    const outerIdx = (exteriorSide !== null) ? (exteriorSide - 1) : 0;
+    newOuterFaceAnchor[rep] = { kind: 'dart', value: descendants[outerIdx].darts[0] };
+  }
 
   return { outerFaceAnchor: newOuterFaceAnchor, parentAnchor: newParentAnchor };
 }

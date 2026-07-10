@@ -50,7 +50,7 @@ import SelectionState from './selectionState.js';
 import BoardView from './boardView.js';
 import Renderer, { pathMidpoint } from './renderer.js';
 import * as DrawInteraction from './drawInteraction.js';
-import { resolveMoveCorners } from './cornerGeometry.js';
+import { resolveMoveCorners, resolveMovePlacement } from './cornerGeometry.js';
 
 // Local mapping from engine violation codes to player-facing text.
 // This is deliberately the UI's job — the engine only emits codes,
@@ -261,7 +261,14 @@ const UI = (() => {
     const { startCorner, endCorner } = resolveMoveCorners(
       engineStateBefore, a, b, path, BoardView.getEdgePath
     );
-    const move = createMove(a, b, startCorner, endCorner);
+    // PR 10: real enclosure resolution — if this move's loop encloses
+    // other components, derive π (which occupants land inside) and
+    // exteriorSide from the drawn curve's geometry. Non-enclosing
+    // moves get empty placement / null exteriorSide, unchanged.
+    const { placement, exteriorSide } = resolveMovePlacement(
+      engineStateBefore, a, b, startCorner, endCorner, path, BoardView.getDotPosition
+    );
+    const move = createMove(a, b, startCorner, endCorner, placement, exteriorSide);
     const result = Engine.apply(move);
 
     if (!result.ok) {

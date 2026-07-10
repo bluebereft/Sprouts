@@ -12,7 +12,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existingAngles, resolveMoveCorners } from '../js/cornerGeometry.js';
+import { existingAngles, resolveMoveCorners, resolveMovePlacement } from '../js/cornerGeometry.js';
+import { buildInitialTopology } from '../js/engine/regions.js';
 
 const EPS = 1e-6;
 function assertAngleClose(actual, expected, msg) {
@@ -131,4 +132,66 @@ test('resolveMoveCorners: self-loop on a degree-1 dot — both corners are alway
   const { startCorner, endCorner } = resolveMoveCorners(degree1State, 5, 5, loopPath, getPath0);
   assert.equal(startCorner, 0);
   assert.equal(endCorner, 0);
+});
+
+// ── resolveMovePlacement: enclosure π from drawn geometry (PR 10) ──
+
+function threeIsolatedDots() {
+  return {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }, { id: 2, lives: 3 }],
+    edges: [], moves: [], initialDotCount: 3, startingPlayer: 0,
+    nextDotId: 3, ...buildInitialTopology(3),
+  };
+}
+
+test('resolveMovePlacement: a self-loop around one dot puts it inside (side 1), leaves the other outside (side 2)', () => {
+  const state = threeIsolatedDots();
+  // A square loop drawn from dot 0, enclosing the region around
+  // (50,50). Dot 1 sits inside it; dot 2 sits far outside.
+  const loop = [
+    { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 0, y: 0 },
+  ];
+  const positions = { 1: { x: 50, y: 50 }, 2: { x: 500, y: 500 } };
+  const getDotPosition = id => positions[id] ?? null;
+
+  const { placement, exteriorSide } = resolveMovePlacement(
+    state, 0, 0, /*startCorner*/0, /*endCorner*/0, loop, getDotPosition
+  );
+  // K = {1, 2} (both siblings share the plane's outer region). Dot 1
+  // enclosed → interior (side 1); dot 2 outside → exterior (side 2).
+  assert.deepEqual(placement, { 1: 1, 2: 2 });
+  assert.equal(exteriorSide, 2);
+});
+
+test('resolveMovePlacement: with no drawn enclosure, both siblings resolve to the exterior side', () => {
+  const state = threeIsolatedDots();
+  // A tiny loop near dot 0 that encloses neither sibling.
+  const loop = [
+    { x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }, { x: 0, y: 5 }, { x: 0, y: 0 },
+  ];
+  const positions = { 1: { x: 500, y: 500 }, 2: { x: 800, y: 100 } };
+  const getDotPosition = id => positions[id] ?? null;
+
+  const { placement, exteriorSide } = resolveMovePlacement(
+    state, 0, 0, 0, 0, loop, getDotPosition
+  );
+  // Nobody enclosed — both go to the exterior side (they stay roots).
+  assert.deepEqual(placement, { 1: 2, 2: 2 });
+  assert.equal(exteriorSide, 2);
+});
+
+test('resolveMovePlacement: a lone self-loop with no siblings returns empty placement', () => {
+  const state = {
+    dots: [{ id: 0, lives: 3 }], edges: [], moves: [],
+    initialDotCount: 1, startingPlayer: 0, nextDotId: 1, ...buildInitialTopology(1),
+  };
+  const loop = [
+    { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }, { x: 0, y: 0 },
+  ];
+  const { placement, exteriorSide } = resolveMovePlacement(
+    state, 0, 0, 0, 0, loop, () => null
+  );
+  // K = ∅ → no placement, no exterior side (ordinary lone loop).
+  assert.deepEqual(placement, {});
+  assert.equal(exteriorSide, null);
 });

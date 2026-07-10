@@ -105,7 +105,12 @@ export const RuleError = {
   INCONSISTENT_CORNER_DATA:      'INCONSISTENT_CORNER_DATA',
   PLACEMENT_NOT_YET_SUPPORTED:   'PLACEMENT_NOT_YET_SUPPORTED',
   DIFFERENT_REGIONS:             'DIFFERENT_REGIONS',
+  // Retained for compatibility; no longer emitted (PR 10 lifted the
+  // non-empty-K restriction). PLACEMENT_DOMAIN_MISMATCH replaced it.
   NONEMPTY_K_NOT_YET_SUPPORTED:  'NONEMPTY_K_NOT_YET_SUPPORTED',
+  // PR 10: a split's placement π must have domain exactly K, values
+  // in {1,2}. Emitted when it doesn't.
+  PLACEMENT_DOMAIN_MISMATCH:     'PLACEMENT_DOMAIN_MISMATCH',
 };
 
 /**
@@ -261,22 +266,44 @@ export function validateMove(state, move) {
         const dotIds = state.dots.map(d => d.id);
         const components = getComponents(state.edges, dotIds);
         const touchedComponent = components.find(members => members.includes(startDotId));
-        const K = computeK(faces, state.parentAnchor, startFace, touchedComponent[0]);
+        // PR 10: outerFaceAnchor passed so computeK sees sibling
+        // roots sharing the plane's outer region as occupants.
+        const K = computeK(
+          faces, state.parentAnchor, startFace, touchedComponent[0], state.outerFaceAnchor
+        );
 
-        if (K.length > 0) {
-          violations.push({ rule: RuleError.NONEMPTY_K_NOT_YET_SUPPORTED, dotId: startDotId });
-          placementRequiredEmpty = false; // can't yet validate a real placement either way
+        // Spec §7.3: for a split, dom(π) MUST equal K exactly, and
+        // every value MUST be 1 or 2. No further constraint — by
+        // Proposition 7.4 there is no such thing as an illegal
+        // placement. A split therefore does NOT require empty
+        // placement; it requires a placement whose domain is exactly
+        // K. (Merges still require empty placement — handled in the
+        // else branch by leaving placementRequiredEmpty true.)
+        placementRequiredEmpty = false;
+
+        const placementObj = (placement && typeof placement === 'object') ? placement : {};
+        const domain = Object.keys(placementObj).map(Number);
+        const KSet = new Set(K);
+        const domainSet = new Set(domain);
+
+        const domainMatchesK =
+          domain.length === K.length &&
+          K.every(rep => domainSet.has(rep)) &&
+          domain.every(rep => KSet.has(rep));
+        const allValuesValid = domain.every(rep => placementObj[rep] === 1 || placementObj[rep] === 2);
+
+        if (!domainMatchesK || !allValuesValid) {
+          violations.push({ rule: RuleError.PLACEMENT_DOMAIN_MISMATCH, dotId: startDotId });
         }
       }
       // else: merge — placementRequiredEmpty stays true, no K concept applies.
     }
   }
 
-  // Placement (spec's π): required to be empty whenever
-  // placementRequiredEmpty is still true (the default, and every
-  // K = ∅ / merge case above) — see file header. A non-null,
-  // non-empty value can't yet be checked meaningfully, so it's
-  // rejected rather than silently ignored.
+  // Placement (spec's π): required to be empty for merges and for any
+  // move that didn't reach the split branch above (e.g. already
+  // illegal for a different reason). Splits set placementRequiredEmpty
+  // false and validate dom(π) = K directly above instead.
   const placementIsEmpty =
     placement === null || placement === undefined ||
     (typeof placement === 'object' && Object.keys(placement).length === 0);

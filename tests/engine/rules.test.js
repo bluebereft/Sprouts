@@ -374,7 +374,7 @@ test('validateMove: accepts a merge between two different (root) components — 
 
 // ── validateMove: I-8, real K — v0.9.3 PR 7 ───────────────────────
 
-test('validateMove: rejects a split whose region has real occupants (NONEMPTY_K_NOT_YET_SUPPORTED)', () => {
+test('validateMove: a split enclosing a real occupant needs a placement whose domain is exactly K (PR 10)', () => {
   // Triangle (dots 1,2,3) with an occupant (dot 0) inside face A
   // ({0,2,4}) — same hand-built fixture shape as regions.test.js's
   // occupant test. Vertex 2's corner-0 (dart1 -> alpha=0 -> face A)
@@ -385,6 +385,11 @@ test('validateMove: rejects a split whose region has real occupants (NONEMPTY_K_
   // failing on the first attempt, not by inspection; fixed by using
   // two different vertices' corner-0s instead of one vertex's two
   // corners.)
+  //
+  // The split's region has one occupant (dot 0), so K = {0}. Per
+  // spec §7.3, dom(π) must equal K exactly. PR 10 replaced the old
+  // blanket NONEMPTY_K_NOT_YET_SUPPORTED rejection with this real
+  // domain check.
   const edges = [{ a: 1, b: 2 }, { a: 2, b: 3 }, { a: 3, b: 1 }];
   const rotations = [[], [0, 5], [1, 2], [3, 4]];
   const state = {
@@ -394,9 +399,31 @@ test('validateMove: rejects a split whose region has real occupants (NONEMPTY_K_
     outerFaceAnchor: { 0: { kind: 'vertex', value: 0 }, 1: { kind: 'dart', value: 1 } },
     parentAnchor: { 0: 0, 1: null }, // dot 0 occupies face A (dart 0's face)
   };
-  const result = validateMove(state, {
-    startDotId: 2, endDotId: 3, regionId: 0, startCorner: 0, endCorner: 0, placement: null,
+
+  // (a) No placement at all: dom(∅) ≠ K = {0} → rejected.
+  const noPlacement = validateMove(state, {
+    startDotId: 2, endDotId: 3, startCorner: 0, endCorner: 0, placement: null,
   });
-  assert.equal(result.ok, false);
-  assert.ok(result.violations.some(v => v.rule === RuleError.NONEMPTY_K_NOT_YET_SUPPORTED));
+  assert.equal(noPlacement.ok, false);
+  assert.ok(noPlacement.violations.some(v => v.rule === RuleError.PLACEMENT_DOMAIN_MISMATCH));
+
+  // (b) Correct domain {0} with a valid side → accepted.
+  const goodPlacement = validateMove(state, {
+    startDotId: 2, endDotId: 3, startCorner: 0, endCorner: 0, placement: { 0: 1 },
+  });
+  assert.equal(goodPlacement.ok, true);
+
+  // (c) Wrong domain (names a non-occupant) → rejected.
+  const wrongDomain = validateMove(state, {
+    startDotId: 2, endDotId: 3, startCorner: 0, endCorner: 0, placement: { 0: 1, 99: 2 },
+  });
+  assert.equal(wrongDomain.ok, false);
+  assert.ok(wrongDomain.violations.some(v => v.rule === RuleError.PLACEMENT_DOMAIN_MISMATCH));
+
+  // (d) Correct domain but an invalid side value (not 1 or 2) → rejected.
+  const badSide = validateMove(state, {
+    startDotId: 2, endDotId: 3, startCorner: 0, endCorner: 0, placement: { 0: 3 },
+  });
+  assert.equal(badSide.ok, false);
+  assert.ok(badSide.violations.some(v => v.rule === RuleError.PLACEMENT_DOMAIN_MISMATCH));
 });

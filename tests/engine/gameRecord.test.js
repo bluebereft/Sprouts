@@ -55,7 +55,13 @@ function freshState() {
 function playTwoMoves() {
   let state = freshState();
   state = applyMove(state, createMove(0, 1));
-  state = applyMove(state, createMove(2, 2)); // self-loop, dot 2 has 3 lives
+  // PR 10: dot 2's self-loop, drawn while the {0,1,sprout} component
+  // also sits in the plane's outer region, is an enclosure move —
+  // K = {rep of that component, = 0}. It therefore carries a real
+  // placement (send that component to side 2) and an exteriorSide,
+  // so the fixture models a genuinely legal, containment-sound game
+  // rather than an underspecified one.
+  state = applyMove(state, createMove(2, 2, 0, 0, { 0: 2 }, 2));
   return state;
 }
 
@@ -79,15 +85,15 @@ test('exportGame: does NOT include dots, edges, nextDotId, or currentPlayer', ()
   assert.equal('currentPlayer' in record, false);
 });
 
-test('exportGame: moves are plain {startDotId, endDotId, startCorner, endCorner, placement} objects', () => {
+test('exportGame: moves are plain {startDotId, endDotId, startCorner, endCorner, placement, exteriorSide} objects', () => {
   // v0.9.4 PR 8: regionId retired, corners/placement serialized
-  // instead (spec §7.5). playTwoMoves() constructs moves via the
-  // convenience fallback (no explicit corners), so both fields
-  // faithfully export as null.
+  // instead (spec §7.5). PR 10: exteriorSide added, and move 1 is now
+  // a real enclosure move (see playTwoMoves), so it carries real
+  // corners, a placement, and an exteriorSide — all of which export.
   const state = playTwoMoves();
   const record = exportGame(state);
-  assert.deepEqual(record.moves[0], { startDotId: 0, endDotId: 1, startCorner: null, endCorner: null, placement: null });
-  assert.deepEqual(record.moves[1], { startDotId: 2, endDotId: 2, startCorner: null, endCorner: null, placement: null });
+  assert.deepEqual(record.moves[0], { startDotId: 0, endDotId: 1, startCorner: null, endCorner: null, placement: null, exteriorSide: null });
+  assert.deepEqual(record.moves[1], { startDotId: 2, endDotId: 2, startCorner: 0, endCorner: 0, placement: { 0: 2 }, exteriorSide: 2 });
 });
 
 test('exportGameToJSON: produces valid, parseable JSON', () => {
@@ -220,14 +226,25 @@ test('P-O5: round trip preserves real corners AND convenience-fallback (null) co
   // round-trip under replay. A mix, not just one or the other,
   // since that's the case most likely to expose a serialization bug
   // (e.g. accidentally coercing null to 0, or vice versa).
+  //
+  // PR 10: freshState() has 3 dots, so the second move (connecting
+  // dots 0 and 1, already joined by the first move's sprout) is a
+  // split whose region still contains the isolated dot 2 — i.e. an
+  // enclosure move with K = {2}. It therefore now carries a real
+  // placement π = {2: 1} and an exteriorSide, both of which must
+  // ALSO round-trip. This makes the test stronger than before:
+  // corners, placement, AND exterior-side all serialize and replay.
   let state = freshState();
   state = applyMove(state, createMove(0, 1)); // convenience fallback: null corners
-  state = applyMove(state, createMove(0, 1, 0, 0)); // explicit real corners
+  state = applyMove(state, createMove(0, 1, 0, 0, { 2: 1 }, 2)); // real corners + enclosure π
 
   const record = exportGame(state);
   assert.equal(record.moves[0].startCorner, null);
+  assert.equal(record.moves[0].placement, null);
   assert.equal(record.moves[1].startCorner, 0);
   assert.equal(record.moves[1].endCorner, 0);
+  assert.deepEqual(record.moves[1].placement, { 2: 1 });
+  assert.equal(record.moves[1].exteriorSide, 2);
 
   const result = importGame(record);
   assert.equal(result.ok, true);

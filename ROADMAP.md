@@ -537,24 +537,23 @@ feature gaps, sequenced as follows (agreed July 2026):
   browser/DOM test infrastructure exists (same PR 4 scope cut), so
   the actual pointer-drag wiring needs a manual playtest, not yet
   done.
-- **PR 10 — Nonempty-K placement (enclosure / nested containment).**
-  The biggest remaining gap: PR 5's containment layer only handles
-  root-merges and K=∅ splits (spec-documented restriction); any move
-  that would enclose another component — the ordinary Sprouts case of
-  looping a line around another dot — is currently accepted by the
-  engine without ever registering the enclosure (confirmed by direct
-  test: the engine has no coordinates, so K comes back empty for any
-  component that was never previously nested, regardless of what was
-  actually drawn). This doesn't yet cause a visible browser bug —
-  nothing today reads containment in a way that would expose it — but
-  it will silently corrupt region-legality answers the moment
-  anything depends on it (enumeration, game-over detection, puzzle
-  generation, bots). Requires: (1) a literature check of the
-  boundary-orientation convention against Čížek & Balko before design
-  (open item R2, migration-plan.md), (2) full Design → Design Review
-  → tech-lead sign-off given the conceptual difficulty, (3) absorbs
-  the multi-region Euler formula test coverage deferred at PR 6.
-  Largest PR remaining; everything after it is comparatively small.
+- **PR 10 — Nonempty-K placement (enclosure).** ✅ **COMPLETE** —
+  moves that enclose other components (looping a line around other
+  dots) are now handled correctly, engine + browser (Option B, one
+  PR). Root cause was `computeK` not seeing sibling root components
+  sharing the plane's outer region; fixed via a ⊥-region branch. The
+  reducer now redistributes enclosed occupants to the two sides of a
+  split per a placement π, and the browser derives π from the drawn
+  curve's geometry (point-in-polygon) — so looping around a dot really
+  encloses it. A Move gained an `exteriorSide` field so occupants left
+  outside the loop stay roots (canonical). Literature-checked against
+  Čížek & Balko first (confirmed the split partition needs geometry,
+  validating the π design). 202/202 tests, including an exhaustive
+  walker that now generates every enclosure outcome up to depth 2.
+  Residual: merge of a nested component still unexercised (PR 11 may
+  surface it); full face-naming canonicalisation is Phase 2; live
+  pointer-drag needs a manual playtest (no DOM harness). See
+  docs/migration-plan.md for the full record.
 - **PR 11 — Legal move enumeration + `hasLegalMove` + game-over
   detection.** Correct by construction once PR 10 lands. Foundation
   for puzzle Tier 1's generator/classifier and every future bot.

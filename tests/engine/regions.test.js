@@ -45,8 +45,8 @@ import {
 } from '../../js/engine/regions.js';
 import { applyMove } from '../../js/engine/reducer.js';
 import { createMove } from '../../js/engine/move.js';
-import { ContainmentError } from '../../js/engine/containment.js';
-import { getComponents, traceFaces } from '../../js/engine/faces.js';
+import { ContainmentError, computeK } from '../../js/engine/containment.js';
+import { getComponents, traceFaces, cornerFace } from '../../js/engine/faces.js';
 
 function scriptedState(dotCount) {
   return {
@@ -310,20 +310,22 @@ test('checkInvariantsV2: propagates a containment violation (I-1) from checkCont
 // resulting containment (determinism / no hidden state).
 //
 // "Restricted scope" here means: self-loops (always trivially
-// same-face — see below) and moves between vertices in DIFFERENT
-// components (always a genuine root merge, since nothing in this
-// restricted universe ever becomes non-root — see containment.js's
-// file header for the closed-scope argument). EXCLUDED: connecting
-// two vertices already in the SAME component but potentially on
+// same-face — a split) and moves between vertices in DIFFERENT
+// components (a merge). PR 10 update: self-loops that ENCLOSE
+// sibling components (K ≠ ∅) are now generated too, with every
+// placement × exterior-side choice enumerated (see allLegalMoves) —
+// the enclosure case PR 5 had deferred is now exhaustively walked.
+// STILL EXCLUDED: connecting two vertices already in the SAME
+// component but potentially on
 // different faces of it — discovered by an earlier version of this
 // very test. Resolved at PR 5b: this case is proven ALWAYS illegal
 // (spec D4 + §7.3 — see rules.js's file header for the proof) and is
 // now rejected by validateMove() whenever real corners are used
 // (rules.test.js's SAME_COMPONENT_DIFFERENT_FACE tests). It remains
-// excluded from THIS generator because allLegalMoves() here builds
-// legacy (cornerless) moves, which validateMove does not check for
-// this — a deliberate, documented residual gap tied to spec open
-// question O-Q1, not a re-opening of the original finding.
+// excluded from THIS generator because allLegalMoves() only ever
+// pairs vertices in DIFFERENT components (merges) or a vertex with
+// itself (self-loop splits) — it never constructs a same-component
+// cross-face chord, so the illegal case simply isn't generated.
 
 function allLegalMoves(state) {
   const moves = [];
@@ -332,6 +334,8 @@ function allLegalMoves(state) {
   const componentOf = new Map();
   components.forEach(members => members.forEach(id => componentOf.set(id, members[0])));
 
+  const faces = traceFaces(state.edges, state.rotations);
+
   for (const a of state.dots) {
     for (const b of state.dots) {
       if (a.id > b.id) continue; // undirected; avoid duplicate (b,a)
@@ -339,10 +343,53 @@ function allLegalMoves(state) {
       if (!isLoop && componentOf.get(a.id) === componentOf.get(b.id)) continue; // excluded — see header
 
       const legal = isLoop ? a.lives >= 2 : (a.lives >= 1 && b.lives >= 1);
-      if (legal) moves.push(createMove(a.id, b.id));
+      if (!legal) continue;
+
+      if (!isLoop) {
+        // Cross-component merge — K has no meaning; simple move.
+        moves.push(createMove(a.id, b.id));
+        continue;
+      }
+
+      // Self-loop (split). PR 10: it may enclose sibling occupants K.
+      // A cornerless move can't name which side is which, so we build
+      // an explicit-corner move (corner 0/0 — valid for the degree-0
+      // and degree-1 dots this restricted walk produces) and, when
+      // K ≠ ∅, enumerate EVERY placement × exterior-side choice, so
+      // the exhaustive walk really covers all reachable enclosure
+      // outcomes rather than one arbitrary drawing.
+      const rep = componentOf.get(a.id);
+      const loopFace = cornerFace(state.edges, state.rotations, faces, a.id, 0);
+      const K = computeK(faces, state.parentAnchor, loopFace, rep, state.outerFaceAnchor);
+
+      if (K.length === 0) {
+        moves.push(createMove(a.id, a.id, 0, 0));
+        continue;
+      }
+
+      // Enumerate π: K → {1,2} (all 2^|K| assignments) and, for each,
+      // both choices of which side is the exterior (⊥) one.
+      const assignments = enumeratePlacements(K);
+      for (const placement of assignments) {
+        for (const exteriorSide of [1, 2]) {
+          moves.push(createMove(a.id, a.id, 0, 0, placement, exteriorSide));
+        }
+      }
     }
   }
   return moves;
+}
+
+/** All π: K → {1,2}, as an array of {rep: side} objects. */
+function enumeratePlacements(K) {
+  const out = [];
+  const total = 1 << K.length; // 2^|K|
+  for (let mask = 0; mask < total; mask++) {
+    const p = {};
+    K.forEach((rep, i) => { p[rep] = ((mask >> i) & 1) ? 2 : 1; });
+    out.push(p);
+  }
+  return out;
 }
 
 function exhaustiveWalk(dotCount, depth, path, state, assertFn) {
