@@ -198,7 +198,21 @@ const UI = (() => {
       const candidateMove = createMove(clickedId, clickedId, 0, 0);
       const validation = Engine.validate(candidateMove);
 
-      if (!validation.ok) {
+      // The placement (π) of an enclosure loop can only be known once
+      // the curve is actually drawn (it depends on which dots the
+      // loop encloses). So at TAP time — before any curve exists —
+      // a PLACEMENT_DOMAIN_MISMATCH is expected and NOT a real
+      // rejection: it just means "this loop may enclose things, draw
+      // it to find out." commitMove() resolves the real placement
+      // from the drawn geometry and Engine.apply validates it for
+      // real. We therefore ignore that one violation here, and only
+      // block the pre-check on genuinely pre-draw-knowable reasons
+      // (lives, a nonexistent dot, etc.).
+      const blockingViolations = validation.ok
+        ? []
+        : validation.violations.filter(v => v.rule !== RuleError.PLACEMENT_DOMAIN_MISMATCH);
+
+      if (blockingViolations.length > 0) {
         // Unlike a drawing-geometry rejection (crossing, self-
         // intersection), this is not retryable — the dot's lives
         // won't change if the player taps it again. Clear the
@@ -206,7 +220,7 @@ const UI = (() => {
         // with no way to back out; a second tap would otherwise just
         // re-enter this same branch and repeat the same rejection.
         SelectionState.clearFirst();
-        const message = validation.violations
+        const message = blockingViolations
           .map(v => VIOLATION_MESSAGES[v.rule] ?? 'Illegal move.')
           .join(' ');
         setStatus(`${message} Select first endpoint.`);
