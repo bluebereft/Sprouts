@@ -28,14 +28,20 @@
    components sharing the plane's outer region are now correctly seen
    as occupants when that shared region is split.
 
-   MERGE is still restricted to two ROOT components (the ordinary
-   "connect two separate structures" case). Merging a component that
-   is itself nested, or that carries its own occupants needing
-   re-parenting, is NOT yet exercised — it does not arise from the
-   move set the browser currently produces. Left for the enumeration
-   work (PR 11) to surface with real cases if it can; recorded as a
-   residual limitation in docs/migration-plan.md rather than silently
-   assumed away.
+   MERGE now handles absorption of an already-nested occupant too
+   (PR 10a) — e.g. connecting a loop's owner to its own enclosed dot,
+   which is one of the most natural moves after an enclosure and is
+   directly reachable from ordinary play (found via manual playtest,
+   not the enumeration walker). The independent per-side rule (see
+   updateContainmentForMerge's own doc comment) covers root-root,
+   absorption, and true-sibling merges uniformly, with no special
+   casing by shape. What repA/repB's OWN occupants (if either already
+   carries nested occupants of its own, beyond the simple absorption
+   case) need is unaffected by this fix and untouched by design: their
+   anchors are DARTS, which remain valid regardless of which
+   component number currently "owns" the face they resolve to, since
+   traceFaces/getComponents relabel components fresh from darts alone
+   on every query — no re-keying is ever needed.
 
    Same-component/different-face moves (a "chord") remain rejected
    upstream in rules.js (DIFFERENT_REGIONS, since PR 7) and so never
@@ -164,19 +170,59 @@ export function computeK(faces, parentAnchor, hostFace, excludeRep, outerFaceAnc
 
 /**
  * Containment update for a MERGE (double-boundary move) — spec
- * §8.2. RESTRICTED to both components being roots with no occupants
- * (see file header). Trusts this precondition; does not verify it.
+ * §8.2. Generalised at PR 10a: handles absorption of an
+ * already-nested occupant (e.g. connecting a loop's owner to its own
+ * enclosed dot), not just two-root merges — see migration-plan.md's
+ * PR 10a entry for the design-review correction that arrived at the
+ * rule below (the first draft assumed a root-root/absorption binary
+ * and asserted a third case impossible without verifying it).
+ *
+ * Rule: evaluate each component INDEPENDENTLY, using only its own
+ * corner/face — never by comparing the two sides to each other.
+ * For component X (A or B): was X's own outer face the one X's
+ * corner touched? If yes, X's contribution is "my exterior is being
+ * fused" (the fused face becomes the new outer face). If no — the
+ * move only touched one of X's own INTERIOR faces (X absorbed an
+ * occupant, or is itself being absorbed into something touching one
+ * of ITS interior faces) — X's true outer face is completely
+ * untouched and remains correct going forward.
+ *
+ *   both touched  → new outer anchor = the fused face (today's
+ *                   root-root behaviour; also correctly covers true
+ *                   siblings merging within a shared parent's face)
+ *   exactly one    → new outer anchor = the UNTOUCHED side's
+ *                   original anchor, unchanged (the absorption fix)
+ *   neither touched → verified unreachable from any LEGAL move: a
+ *                   cross-component connection is only legal when at
+ *                   least one side is touched at its own outer face
+ *                   (that's the only way to "reach" a foreign
+ *                   component's boundary at all — see PR 10a design
+ *                   notes for the case-by-case legality argument).
+ *                   Fails loudly rather than silently corrupting
+ *                   state if this assumption ever turns out wrong.
+ *
+ * The survivor's parentAnchor is simply whichever side's own face
+ * was NOT touched (that side's external relationship is completely
+ * unaffected by this move); when both are touched, both parents are
+ * already equal (siblings) or both null (roots) by the move's own
+ * legality precondition, so either is correct.
  *
  * @param {object} outerFaceAnchor — state.outerFaceAnchor (old)
  * @param {object} parentAnchor — state.parentAnchor (old)
  * @param {number} repA — representative of the first component
  * @param {number} repB — representative of the second component
+ * @param {Array<{component:number, darts:number[]}>} oldFaces —
+ *   traceFaces() result BEFORE this move
+ * @param {object} startFace — the (old) face repA's corner resolved to
+ * @param {object} endFace — the (old) face repB's corner resolved to
  * @param {Array<{component:number, darts:number[]}>} newFaces —
  *   traceFaces() result AFTER the move's σ-update
  * @param {number[]} newDarts — the 4 dart ids this move created
  * @returns {{ outerFaceAnchor: object, parentAnchor: object }}
  */
-export function updateContainmentForMerge(outerFaceAnchor, parentAnchor, repA, repB, newFaces, newDarts) {
+export function updateContainmentForMerge(
+  outerFaceAnchor, parentAnchor, repA, repB, oldFaces, startFace, endFace, newFaces, newDarts
+) {
   const survivingRep = Math.min(repA, repB);
   const removedRep = survivingRep === repA ? repB : repA;
 
@@ -186,13 +232,37 @@ export function updateContainmentForMerge(outerFaceAnchor, parentAnchor, repA, r
   // wrapping around the new sprout).
   const fusedFace = newFaces.find(f => newDarts.some(d => f.darts.includes(d)));
 
+  const aOldOuter = resolveOuterFaceAnchor(oldFaces, outerFaceAnchor[repA]);
+  const bOldOuter = resolveOuterFaceAnchor(oldFaces, outerFaceAnchor[repB]);
+  const aOwnFaceTouched = aOldOuter === startFace;
+  const bOwnFaceTouched = bOldOuter === endFace;
+
+  let newOuterAnchorValue;
+  let newParentAnchorValue;
+  if (aOwnFaceTouched && bOwnFaceTouched) {
+    newOuterAnchorValue = { kind: 'dart', value: fusedFace.darts[0] };
+    newParentAnchorValue = parentAnchor[repA]; // === parentAnchor[repB] by legality
+  } else if (aOwnFaceTouched && !bOwnFaceTouched) {
+    newOuterAnchorValue = outerFaceAnchor[repB]; // unchanged, still valid
+    newParentAnchorValue = parentAnchor[repB];
+  } else if (!aOwnFaceTouched && bOwnFaceTouched) {
+    newOuterAnchorValue = outerFaceAnchor[repA];
+    newParentAnchorValue = parentAnchor[repA];
+  } else {
+    throw new Error(
+      "updateContainmentForMerge: neither component's own outer face " +
+      'was touched by this move — should be unreachable from any ' +
+      'legal move (see PR 10a design notes in migration-plan.md).'
+    );
+  }
+
   const newOuterFaceAnchor = { ...outerFaceAnchor };
   delete newOuterFaceAnchor[removedRep];
-  newOuterFaceAnchor[survivingRep] = { kind: 'dart', value: fusedFace.darts[0] };
+  newOuterFaceAnchor[survivingRep] = newOuterAnchorValue;
 
   const newParentAnchor = { ...parentAnchor };
   delete newParentAnchor[removedRep];
-  newParentAnchor[survivingRep] = null; // still a root
+  newParentAnchor[survivingRep] = newParentAnchorValue;
 
   return { outerFaceAnchor: newOuterFaceAnchor, parentAnchor: newParentAnchor };
 }

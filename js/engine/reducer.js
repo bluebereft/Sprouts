@@ -264,7 +264,7 @@ export function applyMove(state, move) {
     ({ outerFaceAnchor: newOuterFaceAnchor, parentAnchor: newParentAnchor } =
       updateContainmentForMerge(
         state.outerFaceAnchor, state.parentAnchor, repA, repB,
-        newFaces, newDartsForThisMove
+        oldFaces, startFace, endFace, newFaces, newDartsForThisMove
       ));
   }
 

@@ -189,6 +189,11 @@ test('degreeOf: lives === 3 - degreeOf(edges, id) holds for every dot across a s
   let state = freshState();
   state.dots.push({ id: 2, lives: 3 });
   state.rotations.push([]); // keep rotations in sync with dots (reducer assumes this)
+  // PR 10a: updateContainmentForMerge now reads BOTH sides' existing
+  // outer anchors, so a manually-pushed dot needs one seeded too, not
+  // just dots/rotations — otherwise merging it crashes.
+  state.outerFaceAnchor[2] = { kind: 'vertex', value: 2 };
+  state.parentAnchor[2] = null;
   state.nextDotId = 3;
 
   state = applyMove(state, createMove(0, 1));

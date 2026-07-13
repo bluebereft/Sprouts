@@ -917,6 +917,229 @@ pick identical darts. (3) No browser/DOM test harness still (same PR 4
 cut) — the point-in-polygon logic and the engine bridge are tested
 headlessly; the live pointer-drag needs a manual playtest.
 
+**PR 10 manual playtest findings (Jared) — TWO bugs found, both
+confirmed by direct engine trace, neither yet fixed.** Residual
+limitation (1) above turned out to be directly reachable from
+ordinary play, not a hypothetical: enclosing a dot and then
+connecting the loop's owner to that same enclosed dot is one of the
+most natural next moves, and it hits exactly that unexercised path.
+
+- **Bug 1 — interior/exterior side assigned by dart numbering, not
+  geometry.** `resolveMovePlacement` hardcodes "inside the drawn
+  loop → side 1," but which physical σ-face is side 1 is determined
+  by dart numbering, unrelated to which face the loop geometrically
+  encloses. When they disagree, the enclosed dot gets nested into the
+  wrong face and later same-region checks correctly (!) report the
+  dots as being in different regions — this is why the same move
+  worked from one dot and failed from another (asymmetric only
+  because dart numbering happened to align for one and not the
+  other). Root cause traced with a direct probe: with a hand-picked
+  *correct* placement, the identical scenario works; the browser
+  simply has no way today to derive that correct placement from
+  screen coordinates.
+- **Bug 2 — merge corrupts containment when absorbing a nested
+  occupant.** Separate from Bug 1 and found by continuing the trace
+  with a hand-verified-correct placement: connecting the loop's owner
+  to its own enclosed occupant (a legal move, and a merge in the
+  engine's classification) silently overwrites the owner's
+  `outerFaceAnchor` to point at the *interior* face instead of
+  leaving the untouched true exterior alone. `checkInvariantsV2`
+  cannot see this — by design, no σ-only invariant can, since which
+  face is "outer" isn't decidable from σ (P-O3) and the engine can
+  only preserve a told fact, not verify one. This corrupted state
+  then poisons a THIRD, later move (the bisecting split Jared
+  predicted mathematically): `computeK` misreads the interior face as
+  the plane's outer region and wrongly includes the far-away exterior
+  dot as an occupant, producing `DIFFERENT_REGIONS`/
+  `PLACEMENT_DOMAIN_MISMATCH` even though the two dots being
+  connected are provably on the same face.
+
+Key finding shaping both fixes' test strategy: **this bug class is
+invisible to structural invariants.** Every existing invariant
+(I-1…I-8) passed on the corrupted state. Acceptance for PR 10a/10b
+below is therefore behavioral — play a scripted sequence, then check
+that region-membership answers match the drawing — not structural.
+
+**PR 10a — Merge must preserve containment (engine only).** ✅
+**COMPLETE.** Objective: fix
+`updateContainmentForMerge` so absorbing an already-nested occupant
+(Bug 2) preserves the untouched component's real outer-face anchor
+and parent relationship, instead of always re-pointing the survivor's
+outer anchor at the newly-fused face (only correct for genuine
+root-root merges).
+
+Unified rule, replacing the assumed-root-root special case —
+**corrected at design review** (the first draft framed this as a
+paired "both/one/neither fused" table and asserted the "neither"
+case impossible; that's wrong — the touched corner needn't be on
+either component's OUTER face at all, it can be on one of a
+component's own INTERIOR faces, e.g. connecting to a dot on an inner
+face of an already-multi-face component, so "neither" is a real,
+reachable case, not an assertable impossibility): evaluate each
+component **independently**, per its own corner. For component A: is
+A's outer face literally the face A's corner (`startFace`) resolved
+to? If yes, A's outer anchor moves to the fused face (today's
+root-root behaviour). If no — the touched corner was on one of A's
+OWN interior faces — A's outer anchor is completely unchanged,
+regardless of what happens to B. Apply the identical, independent
+test to B against `endFace`. No paired case analysis needed; each
+component's own anchor update depends only on its own face, never on
+whether the OTHER component's face also happened to be its outer one.
+This uniformly covers root-root (both touched faces are both outer →
+both move, matching today), absorption of a nested occupant (the
+occupant's own trivial face is always "outer" for a childless
+singleton, so its side updates trivially; the OWNER's face is
+untouched, so the owner's real anchor correctly stays put — the actual
+bug fix), and the new case design review caught (a touched INTERIOR
+face on either side leaves that side's outer anchor alone, correctly,
+since it's an unrelated face).
+
+Spec: §8.2 merge update generalised from "both roots" to the unified
+rule above; new documented invariant (not machine-checked): a nested
+occupant's parentAnchor never resolves to its own host's outer face.
+No literature re-check needed (Čížek & Balko's analysis concerned
+splits, not merges). Public API: `updateContainmentForMerge` gains
+`oldFaces, startFace, endFace` params (already available in the
+reducer, which already computes them for the split branch) — no Move
+shape change, no rules.js change (legality was already correct; only
+the state update was wrong). No new invariants; acceptance is the
+behavioral oracle above, plus: Jared's exact 3-move sequence (loop →
+absorb → bisect) validates end to end; root-root merges are
+byte-identical to today (regression); the P-O2 walker gets extended to
+generate real corners for cross-component moves so depth-2 walks
+actually reach the absorption path (today's cornerless walker moves
+never did — a gap in the walker, not just the engine, worth fixing at
+the same time). Scope fence: no geometry, no browser files, no split
+handling changes, does not attempt Bug 1.
+
+**Implementation.** Files: `js/engine/containment.js`
+(`updateContainmentForMerge` rewritten per the independent-per-side
+rule; new params `oldFaces, startFace, endFace`), `js/engine/reducer.js`
+(passes them through — already had all three in scope at the merge
+call site, no new computation needed).
+
+**A real, second design gap found DURING implementation** (not caught
+at design review, only by running the actual exhaustive walker): the
+P-O2 walker's cross-component moves were cornerless, and the
+reducer's `impliedCorner` fallback (last-inserted dart) does not
+reliably correspond to a region-legal face once occupants can be
+asymmetrically nested after an enclosure. The walker fed such a move
+straight to `applyMove` (which trusts its caller and does not
+validate — by design), silently corrupting containment into a literal
+self-referencing cycle (`parentAnchor[0] = 0`) and tripping
+`FOREST_CYCLE`/`PARENT_UNSOUND`. Traced to ground with a standalone
+probe before touching the real test file: confirmed the specific
+failing move was genuinely illegal (the two touched faces were
+different regions) and would have been rejected by `validateMove`
+had anything asked it. Fixed the walker itself — it now tries every
+real corner pair per cross-component candidate and keeps only the
+ones `validateMove` accepts, exactly as the design's own "extend the
+walker" note anticipated, just discovered as a hard failure rather
+than found by inspection. Re-ran the probe against 1–3 dots up to
+depth 3 with the fixed walker: clean. This was a **test-generator
+bug, not an engine bug** — worth stating plainly since it's easy to
+misfile as evidence the merge fix was wrong.
+
+Three pre-existing test fixtures (`darts.test.js`,
+`reducer.test.js` ×2) surfaced a latent gap of their own: they
+manually pushed a 3rd dot onto `state.dots`/`state.rotations` without
+seeding matching `outerFaceAnchor`/`parentAnchor` entries — harmless
+under the old merge code (which never read the other side's anchor),
+but a crash under the new one (which does). Fixed by seeding those
+entries the same way an already-correct nearby fixture in the same
+file already did — not a new pattern, just applying the existing
+one everywhere the state shape requires it.
+
+**Tests:** `containment.test.js` — the two existing direct
+`updateContainmentForMerge` tests updated for the new signature
+(constructing real `oldFaces`/`startFace`/`endFace` fixtures, hand-
+verified against `traceFaces` output rather than assumed) plus one
+new test isolating the absorption fix directly (host's outer anchor
+must be byte-identical before/after, not merely "close"). `engine.test.js`
+— the key end-to-end acceptance oracle: Jared's exact 3-move sequence
+(enclosing self-loop → owner absorbs the enclosed dot → the enclosed
+dot connects to the loop's own sprout, bisecting the enclosed region),
+discovering each move's real corners via `Engine.validate` rather than
+hardcoding indices, so the test doesn't silently depend on internal
+dart-numbering staying fixed. All three moves now validate and apply;
+dot 2 (always outside the loop) is confirmed to never become
+reachable throughout. `regions.test.js` — P-O2 walker fixed as above.
+204/204 tests passing (203 prior + 1 new acceptance test; the walker
+fix and fixture seeding are corrections to existing tests, not new
+counts).
+
+**Residual, explicit:** Bug 1 (interior/exterior side chosen by dart
+numbering rather than geometry) is untouched — that's PR 10b's job,
+next. The "neither touched" branch (a coded `throw`, not a silent
+wrong answer) remains unexercised by any test — attempted
+construction of a legal move reaching it failed for every scenario
+tried, consistent with the region-sharing legality argument in the
+design (reaching a foreign component always requires touching at
+least one side's own outer face), but this is not a proof, and the
+throw stays in place specifically so a wrong assumption fails loudly
+rather than corrupting state, exactly as designed.
+
+**PR 10b — Geometric interior-side resolution (browser bridge, design
+recorded, not yet implemented).** Objective: replace
+`resolveMovePlacement`'s hardcoded "inside → side 1" with a real
+geometric determination of which σ-side is the drawn loop's interior.
+
+Records why three earlier same-session attempts failed, so they're
+not retried: (a) ray-from-dot-toward-occupant — unsound for
+non-convex loops; (b) speculative-apply-as-oracle — the engine has no
+geometry, it just obeys whichever placement it's given, so both
+choices "succeed" and the probe can't discriminate; (c) whole-loop
+polygon per descendant face — a self-loop is ONE stored curve but
+TWO engine edges, so both faces' walks trace the same closed curve
+and point-in-polygon can't tell them apart.
+
+Design, two mechanisms for two cases. (1) Split of a bounded interior
+face: descendant faces have genuinely different boundary polygons —
+speculatively apply, trace, build each face's polygon from real drawn
+paths (existing edges via `getEdgePath`, the just-drawn move's own
+TWO edges via a new `splitPathAtMidpoint` in pathGeometry.js that
+splits the drawn curve at the sprout's arc-length midpoint, sharing
+the arc-length walk with `arcLengthSplit` — single source of truth,
+PR 9 discipline). Occupants assigned per-polygon; no side convention
+needed; exteriorSide null. (2) Split of the plane's outer region (the
+actual enclosure case): both descendant walks trace the SAME curve
+with opposite winding, so point sets are identical and containment
+can't discriminate — but SIGNED AREA can. Because PR 9 inserts darts
+in true angular order, the rotation system is geometrically faithful,
+so bounded vs. unbounded faces have a FIXED, global, opposite sign —
+a single boolean constant, pinned empirically by hand-built fixtures
+(not re-derived by hand-reasoning, which is exactly the mistake that
+shipped Bug 1), and asserted by a mirror-pair test: the same
+enclosure drawn clockwise and counterclockwise must both resolve
+correctly — the test that would have caught Bug 1's asymmetry
+directly.
+
+Spec: §7.2 placement now geometrically grounded; P-O3/R2 close fully
+(orientation isn't decidable from σ alone, but IS now resolved for
+browser play via the pinned sign convention, documented as such — not
+reopening the σ-level finding). Dependencies: PR 10a (oracle
+sequences need correct merge behaviour to test past the enclosure
+move); PR 9 (angular-order corner insertion is what makes the sign
+argument valid — explicitly does NOT hold for cornerless/
+convenience moves, which never reach this path). Public API:
+`pathGeometry.js` gains `splitPathAtMidpoint`; `cornerGeometry.js`'s
+`resolveMovePlacement` gains a `getEdgePath` param. No engine changes.
+Acceptance: the A-vs-C asymmetry pair both resolve correctly, in both
+winding directions; a non-convex (L-shaped) loop resolves correctly;
+Jared's full 3-move sequence's 4th move (an interior split after
+bisection) assigns occupants to the correct sub-region; a loop drawn
+from a dot with pre-existing edges resolves correctly; all 202 prior
+tests unaffected. Scope fence: engine stays geometry-free; cornerless
+moves explicitly unsupported for enclosure; missing stored-path
+fallback uses straight endpoint segments (documented, not fixed).
+
+Sequencing: 10a then 10b, each through full Design → Design Review →
+Implementation → Test → Implementation Review. Tech lead review
+requested for both, given each revises design claims from a PR that
+was already merged. No stopgap planned for the interim (enclosure
+play is a coin flip until 10b lands) — pre-release software, and a
+stopgap would churn rules.js twice for no user benefit.
+
 ## Historic open items carried
 
 1. ~~**O-Q1 ruling**~~ — resolved (Jared): v1 Game Records dropped

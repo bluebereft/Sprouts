@@ -180,6 +180,10 @@ test('applyMove: sigma partition — every dart appears in exactly one rotation 
   let state = freshState();
   state.dots.push({ id: 2, lives: 3 });
   state.rotations.push([]);
+  // PR 10a: updateContainmentForMerge reads both sides' existing
+  // outer anchors, so a manually-pushed dot needs one seeded too.
+  state.outerFaceAnchor[2] = { kind: 'vertex', value: 2 };
+  state.parentAnchor[2] = null;
   state.nextDotId = 3; // avoid colliding sprouts with dot 2's id
   state = applyMove(state, createMove(0, 1));
   state = applyMove(state, createMove(0, 2));
@@ -199,6 +203,8 @@ test('applyMove: rotations[v].length === degreeOf(edges, v) for every vertex, af
   let state = freshState();
   state.dots.push({ id: 2, lives: 3 });
   state.rotations.push([]);
+  state.outerFaceAnchor[2] = { kind: 'vertex', value: 2 };
+  state.parentAnchor[2] = null;
   state.nextDotId = 3; // avoid colliding sprouts with dot 2's id
   const moves = [createMove(0, 1), createMove(0, 2), createMove(2, 2)];
 

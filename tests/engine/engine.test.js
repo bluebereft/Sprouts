@@ -139,3 +139,67 @@ test('apply() internally agrees with validate(): same move, same ok value', () =
   const applyResult = Engine.apply(move);
   assert.equal(validation.ok, applyResult.ok);
 });
+
+// ── PR 10a acceptance: the exact 3-move sequence Jared's manual ────
+// playtest traced by hand (see docs/migration-plan.md's PR 10 / 10a
+// entries). Before PR 10a, move 2 (connecting the loop's owner to
+// its own enclosed occupant) silently corrupted containment, which
+// then wrongly rejected move 3 (the bisecting split) with
+// DIFFERENT_REGIONS even though the two dots involved are provably
+// on the same face. This test is the end-to-end oracle: it doesn't
+// assert on internal anchors, only on what a player observes —
+// which moves validateMove accepts.
+
+test('PR 10a: loop encloses a dot, owner connects to the enclosed dot, then the enclosing loop bisects — all three moves legal', () => {
+  Engine.init({
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }, { id: 2, lives: 3 }],
+    edges: [], moves: [], initialDotCount: 3, startingPlayer: 0,
+    nextDotId: 3, ...buildInitialTopology(3),
+  });
+
+  // Move 1: self-loop on dot 0, enclosing dot 1, leaving dot 2
+  // outside. Placement/exteriorSide independently hand-verified
+  // correct (dot 1 nested, dot 2 stays a root) — see the PR 10
+  // migration-plan.md entry's trace.
+  const move1 = createMove(0, 0, 0, 0, { 1: 2, 2: 1 }, 1);
+  const r1 = Engine.apply(move1);
+  assert.equal(r1.ok, true, 'move 1 (enclosing self-loop) should be legal');
+
+  // Move 2: connect dot 0 (the loop's owner) to dot 1 (now enclosed).
+  // This is the absorption merge PR 10a fixes. Try every real corner
+  // pair and keep the first validateMove accepts — mirroring how a
+  // player's drawn curve resolves to a specific corner, without
+  // hardcoding which corner index that happens to be.
+  const deg0 = r1.state.rotations[0].length;
+  let move2 = null;
+  for (let c0 = 0; c0 < deg0 && !move2; c0++) {
+    const candidate = createMove(0, 1, c0, 0);
+    if (Engine.validate(candidate).ok) move2 = candidate;
+  }
+  assert.ok(move2, 'move 2 (connect owner to its own enclosed dot) should have a legal corner');
+  const r2 = Engine.apply(move2);
+  assert.equal(r2.ok, true);
+
+  // Move 3: connect dot 1 (now degree 1) to dot 3 (move 1's sprout,
+  // on the loop boundary) — the move that actually bisects the
+  // enclosed region. This is exactly what PR 10a's fix makes
+  // possible: before the fix, containment was corrupted by move 2,
+  // and this move was wrongly rejected.
+  const deg1 = r2.state.rotations[1].length;
+  const deg3 = r2.state.rotations[3].length;
+  let move3 = null;
+  for (let c1 = 0; c1 < deg1 && !move3; c1++) {
+    for (let c3 = 0; c3 < deg3 && !move3; c3++) {
+      const candidate = createMove(1, 3, c1, c3);
+      if (Engine.validate(candidate).ok) move3 = candidate;
+    }
+  }
+  assert.ok(move3, 'move 3 (the bisecting split) should have a legal corner pair — this is the PR 10a regression');
+  const r3 = Engine.apply(move3);
+  assert.equal(r3.ok, true);
+
+  // Sanity: dot 2 (always outside the loop) never became reachable
+  // from anything inside it, throughout.
+  const finalDeg2 = r3.state.rotations[2].length;
+  assert.equal(finalDeg2, 0, 'dot 2 should remain untouched throughout (outside the loop)');
+});

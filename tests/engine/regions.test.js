@@ -47,6 +47,7 @@ import { applyMove } from '../../js/engine/reducer.js';
 import { createMove } from '../../js/engine/move.js';
 import { ContainmentError, computeK } from '../../js/engine/containment.js';
 import { getComponents, traceFaces, cornerFace } from '../../js/engine/faces.js';
+import { validateMove } from '../../js/engine/rules.js';
 
 function scriptedState(dotCount) {
   return {
@@ -346,8 +347,28 @@ function allLegalMoves(state) {
       if (!legal) continue;
 
       if (!isLoop) {
-        // Cross-component merge — K has no meaning; simple move.
-        moves.push(createMove(a.id, b.id));
+        // Cross-component merge. PR 10a: try EVERY real corner pair
+        // and keep only the ones validateMove actually accepts,
+        // instead of a single cornerless placeholder move. A
+        // cornerless move's implied corner (reducer.js's
+        // impliedCorner: last-inserted dart) is NOT guaranteed to
+        // correspond to a region-legal drawing once occupants can be
+        // nested asymmetrically after an enclosure — feeding such a
+        // move straight to applyMove (which trusts its caller and
+        // does not validate) silently corrupts containment. Found via
+        // this exact walker producing a PARENT_UNSOUND/FOREST_CYCLE
+        // after PR 10a's merge fix started reading both sides' real
+        // faces — the move itself was always illegal, the walker just
+        // never noticed because nothing validated it. See
+        // migration-plan.md's PR 10a entry.
+        const aDeg = Math.max(1, state.rotations[a.id].length);
+        const bDeg = Math.max(1, state.rotations[b.id].length);
+        for (let ca = 0; ca < aDeg; ca++) {
+          for (let cb = 0; cb < bDeg; cb++) {
+            const candidate = createMove(a.id, b.id, ca, cb);
+            if (validateMove(state, candidate).ok) moves.push(candidate);
+          }
+        }
         continue;
       }
 

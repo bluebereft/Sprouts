@@ -95,12 +95,22 @@ test('updateContainmentForMerge: two isolated roots merging via a bridge move', 
   const outerFaceAnchor = { 0: { kind: 'vertex', value: 0 }, 1: { kind: 'vertex', value: 1 } };
   const parentAnchor = { 0: null, 1: null };
 
+  // PR 10a: the merge now reads BOTH sides' OWN pre-move face to
+  // decide whether that side's outer face was the one touched. Two
+  // isolated roots: each one's own (trivial) face is necessarily the
+  // one touched — verified directly via traceFaces, not assumed.
+  const oldFaces = traceFaces([], [[], []]);
+  const startFace = oldFaces.find(f => f.component === 0);
+  const endFace = oldFaces.find(f => f.component === 1);
+
   const newEdges = [{ a: 0, b: 2 }, { a: 1, b: 2 }];
   const newRotations = [[0], [2], [1, 3]];
   const newFaces = traceFaces(newEdges, newRotations);
   const newDarts = [0, 1, 2, 3];
 
-  const result = updateContainmentForMerge(outerFaceAnchor, parentAnchor, 0, 1, newFaces, newDarts);
+  const result = updateContainmentForMerge(
+    outerFaceAnchor, parentAnchor, 0, 1, oldFaces, startFace, endFace, newFaces, newDarts
+  );
 
   assert.deepEqual(Object.keys(result.outerFaceAnchor), ['0']);
   assert.deepEqual(Object.keys(result.parentAnchor), ['0']);
@@ -109,11 +119,64 @@ test('updateContainmentForMerge: two isolated roots merging via a bridge move', 
 });
 
 test('updateContainmentForMerge: surviving representative is always the smaller id, regardless of argument order', () => {
-  const outerFaceAnchor = { 3: { kind: 'vertex', value: 3 }, 5: { kind: 'vertex', value: 5 } };
+  // Two isolated roots again (own face always touched for both), but
+  // called with repA/repB swapped, to isolate the id-ordering logic
+  // from the fused/unfused decision (already covered above).
+  const outerFaceAnchor = { 3: { kind: 'dart', value: 200 }, 5: { kind: 'dart', value: 100 } };
   const parentAnchor = { 3: null, 5: null };
+  const oldFaces = [
+    { component: 5, darts: [100] },
+    { component: 3, darts: [200] },
+  ];
+  const startFace = oldFaces.find(f => f.component === 5); // repA(5)'s own face
+  const endFace = oldFaces.find(f => f.component === 3);   // repB(3)'s own face
   const newFaces = [{ component: 3, darts: [10, 11] }];
-  const result = updateContainmentForMerge(outerFaceAnchor, parentAnchor, 5, 3, newFaces, [10, 11]);
+  const result = updateContainmentForMerge(
+    outerFaceAnchor, parentAnchor, 5, 3, oldFaces, startFace, endFace, newFaces, [10, 11]
+  );
   assert.deepEqual(Object.keys(result.outerFaceAnchor), ['3']);
+});
+
+test('updateContainmentForMerge: absorbing an already-nested occupant preserves the host\'s real outer face (PR 10a — the Bug 2 fix)', () => {
+  // Host (component 0) has TWO faces: its own true outer face (dart 0)
+  // and an interior face (dart 1) hosting occupant B (component 1),
+  // already nested there (parentAnchor[1] resolves into that interior
+  // face). This move connects the host, drawn from a corner on its
+  // INTERIOR face, to occupant B (whose own single face is always
+  // "touched" trivially). The host's outer face must NOT change.
+  const oldFaces = [
+    { component: 0, darts: [0] },  // host's true outer face
+    { component: 0, darts: [1] },  // host's interior face (hosts B)
+    { component: 1, darts: [] },   // B's own (trivial) face
+  ];
+  const hostOuter = oldFaces[0];
+  const hostInterior = oldFaces[1];
+  const bOwnFace = oldFaces[2];
+
+  const outerFaceAnchor = { 0: { kind: 'dart', value: 0 }, 1: { kind: 'vertex', value: 1 } };
+  const parentAnchor = { 0: null, 1: 1 }; // B nested at dart 1 (host's interior face)
+
+  // The move: host's corner touches its INTERIOR face (startFace);
+  // B's corner touches its own (only) face (endFace).
+  const startFace = hostInterior;
+  const endFace = bOwnFace;
+
+  const newFaces = [{ component: 0, darts: [0] }]; // host's outer face, untouched, still present
+  // Any face containing the new darts is "the fused face" per the
+  // existing search — construct it distinctly so a wrong answer
+  // (accidentally using it) is detectable.
+  const fusedFaceStandin = { component: 0, darts: [50, 51, 52, 53] };
+  const allNewFaces = [...newFaces, fusedFaceStandin];
+
+  const result = updateContainmentForMerge(
+    outerFaceAnchor, parentAnchor, 0, 1, oldFaces, startFace, endFace, allNewFaces, [50, 51, 52, 53]
+  );
+
+  // The host's outer anchor is COMPLETELY UNCHANGED (still dart 0,
+  // NOT the fused face) — this is the actual Bug 2 fix.
+  assert.deepEqual(result.outerFaceAnchor[0], { kind: 'dart', value: 0 });
+  assert.equal(result.parentAnchor[0], null); // host's own external relationship untouched
+  assert.deepEqual(Object.keys(result.outerFaceAnchor), ['0']); // B's entry removed
 });
 
 // ── updateContainmentForSplit ──────────────────────────────────────
