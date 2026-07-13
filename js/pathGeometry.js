@@ -62,14 +62,62 @@ export function departureAngle(points, end) {
 }
 
 /**
+ * Shared arc-length walk: finds the segment index and interpolation
+ * fraction t where the polyline's cumulative length reaches half its
+ * total. Single source of truth for arcLengthSplit() and
+ * splitPathAtMidpoint() below, so "where does the sprout sit" and
+ * "what are the curve's two constituent arcs" can never disagree.
+ *
+ * @param {Array<{x:number,y:number}>} points
+ * @returns {{index:number, t:number, point:{x:number,y:number}}}
+ *   index is the segment [points[index], points[index+1]] containing
+ *   the midpoint; degenerate inputs return index -1.
+ */
+function findArcLengthMidpoint(points) {
+  if (!points || points.length === 0) {
+    return { index: -1, t: 0, point: { x: 0, y: 0 } };
+  }
+  if (points.length === 1) {
+    return { index: -1, t: 0, point: points[0] };
+  }
+
+  const segmentLengths = [];
+  let totalLength = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const len = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+    segmentLengths.push(len);
+    totalLength += len;
+  }
+
+  if (totalLength === 0) {
+    return { index: -1, t: 0, point: points[0] };
+  }
+
+  const halfLength = totalLength / 2;
+  let accumulated = 0;
+
+  for (let i = 0; i < segmentLengths.length; i++) {
+    const segLen = segmentLengths[i];
+    if (accumulated + segLen >= halfLength) {
+      const remaining = halfLength - accumulated;
+      const t = segLen === 0 ? 0 : remaining / segLen;
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const point = { x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t };
+      return { index: i, t, point };
+    }
+    accumulated += segLen;
+  }
+
+  // Floating-point edge case: rounding left the walk just short of
+  // halfLength at the very last segment.
+  return { index: segmentLengths.length - 1, t: 1, point: points[points.length - 1] };
+}
+
+/**
  * Finds the arc-length midpoint of a polyline and the two departure
  * angles a sprout placed there would have — one toward the "start"
  * end of the path, one toward the "end" end.
- *
- * The midpoint is found by walking cumulative segment length until
- * half the total arc length is reached (identical algorithm to the
- * one previously inlined in renderer.js's pathMidpoint — moved here
- * so placement and angle resolution share one implementation).
  *
  * @param {Array<{x:number,y:number}>} points
  * @returns {{
@@ -86,53 +134,66 @@ export function arcLengthSplit(points) {
     return { point: points[0], angleTowardStart: 0, angleTowardEnd: 0 };
   }
 
-  const segmentLengths = [];
-  let totalLength = 0;
-  for (let i = 0; i < points.length - 1; i++) {
-    const len = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-    segmentLengths.push(len);
-    totalLength += len;
+  const { index, t, point } = findArcLengthMidpoint(points);
+
+  if (index === -1) {
+    // All points coincide (degenerate) — matches pathMidpoint's own
+    // degenerate fallback (return points[0]); no direction meaningful.
+    return { point, angleTowardStart: 0, angleTowardEnd: 0 };
   }
 
-  // Degenerate (all points coincide): no direction is meaningful.
-  // Matches pathMidpoint's own degenerate fallback (return points[0]).
-  if (totalLength === 0) {
-    return { point: points[0], angleTowardStart: 0, angleTowardEnd: 0 };
+  const p1 = points[index];
+  const p2 = points[index + 1];
+  // The local tangent at the split point is this segment's
+  // direction. The two rays a sprout departs on are that direction
+  // and its exact reverse (splitting a curve at an interior point
+  // does not create a new bend).
+  const angleTowardEnd   = segmentAngle(p1, p2);
+  const angleTowardStart = angleTowardEnd + Math.PI;
+
+  return { point, angleTowardStart, angleTowardEnd };
+}
+
+/**
+ * Splits a drawn curve into its two constituent arcs at the
+ * arc-length midpoint — the point where a move's sprout sits. This
+ * is what a self-loop's TWO engine edges (dot→sprout, sprout→dot)
+ * actually look like geometrically: arcToStart is the curve from the
+ * split point back to the path's start; arcToEnd is the curve from
+ * the split point forward to the path's end. Each is a real, usable
+ * polyline (≥ 2 points) suitable for building a face's boundary
+ * polygon (see js/cornerGeometry.js's resolveMovePlacement).
+ *
+ * Shares findArcLengthMidpoint with arcLengthSplit — the split point
+ * used for PLACEMENT (sprout position/angles) and the split point
+ * used for GEOMETRY (these two arcs) can never disagree.
+ *
+ * @param {Array<{x:number,y:number}>} points — at least 2 points
+ * @returns {{
+ *   splitPoint: {x:number,y:number},
+ *   arcToStart: Array<{x:number,y:number}>,
+ *   arcToEnd: Array<{x:number,y:number}>
+ * }}
+ */
+export function splitPathAtMidpoint(points) {
+  if (!points || points.length < 2) {
+    const p = (points && points[0]) || { x: 0, y: 0 };
+    return { splitPoint: p, arcToStart: [p], arcToEnd: [p] };
   }
 
-  const halfLength = totalLength / 2;
-  let accumulated = 0;
+  const { index, point } = findArcLengthMidpoint(points);
 
-  for (let i = 0; i < segmentLengths.length; i++) {
-    const segLen = segmentLengths[i];
-    if (accumulated + segLen >= halfLength) {
-      const remaining = halfLength - accumulated;
-      const t  = segLen === 0 ? 0 : remaining / segLen;
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const point = { x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t };
-
-      // The local tangent at the split point is this segment's
-      // direction. The two rays a sprout departs on are that
-      // direction and its exact reverse (splitting a curve at an
-      // interior point does not create a new bend).
-      const angleTowardEnd   = segmentAngle(p1, p2);
-      const angleTowardStart = angleTowardEnd + Math.PI;
-
-      return { point, angleTowardStart, angleTowardEnd };
-    }
-    accumulated += segLen;
+  if (index === -1) {
+    return { splitPoint: point, arcToStart: [point], arcToEnd: [point] };
   }
 
-  // Floating-point edge case: rounding left the walk just short of
-  // halfLength at the very last segment. Fall back to the last point
-  // — same fallback shape pathMidpoint's original loop implicitly
-  // fell through to (function body continues past the loop there).
-  const last = points[points.length - 1];
-  const prev = points[points.length - 2];
-  return {
-    point: last,
-    angleTowardEnd: segmentAngle(prev, last),
-    angleTowardStart: segmentAngle(prev, last) + Math.PI,
-  };
+  // arcToEnd: split point, then forward through the remaining points.
+  const arcToEnd = [point, ...points.slice(index + 1)];
+  // arcToStart: split point, then backward through the preceding
+  // points to the path's actual start — reversed so index 0 is the
+  // split point and the last entry is the true start, matching
+  // arcToEnd's "split point first" shape for a consistent caller API.
+  const arcToStart = [point, ...points.slice(0, index + 1).reverse()];
+
+  return { splitPoint: point, arcToStart, arcToEnd };
 }

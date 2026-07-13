@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { segmentAngle, departureAngle, arcLengthSplit } from '../js/pathGeometry.js';
+import { segmentAngle, departureAngle, arcLengthSplit, splitPathAtMidpoint } from '../js/pathGeometry.js';
 
 const EPS = 1e-9;
 function assertAngleClose(actual, expected, msg) {
@@ -101,4 +101,55 @@ test('arcLengthSplit: degenerate inputs match pathMidpoint\'s old fallbacks', ()
   // All points coincide: zero total length, falls back to points[0].
   const coincident = [{ x: 1, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 1 }];
   assert.deepEqual(arcLengthSplit(coincident).point, { x: 1, y: 1 });
+});
+
+// ── splitPathAtMidpoint (PR 10b) ─────────────────────────────────
+
+test('splitPathAtMidpoint: an L-shaped curve splits at the bend into two real arcs', () => {
+  // (0,0)->(10,0)->(10,10): total length 20, half 10. Walking:
+  // segment0 alone (len 10) already reaches half-length exactly at
+  // its end (accumulated 0 + 10 >= 10), so the split lands AT the
+  // bend point (10,0), t=1, using segment INDEX 0 (not 1) — matching
+  // arcLengthSplit's own documented ">=" boundary rule (keeps the
+  // first segment reaching the threshold).
+  const points = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }];
+  const { splitPoint, arcToStart, arcToEnd } = splitPathAtMidpoint(points);
+  assert.deepEqual(splitPoint, { x: 10, y: 0 });
+  // arcToStart: split point back to the true start (0,0).
+  assert.deepEqual(arcToStart, [{ x: 10, y: 0 }, { x: 0, y: 0 }]);
+  // arcToEnd: split point, then points.slice(index+1) = points[1..] —
+  // since the split point COINCIDES exactly with points[1] (the bend,
+  // t=1), this includes a harmless duplicate of it before continuing
+  // to the true end (10,10). Zero-length edge, doesn't affect any
+  // polygon use — documented, not "fixed away".
+  assert.deepEqual(arcToEnd, [{ x: 10, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }]);
+});
+
+test('splitPathAtMidpoint: a straight line splits at its exact midpoint', () => {
+  // (0,0)->(10,0): length 10, half 5 -> lands at (5,0), inside the
+  // single segment (not on an existing vertex).
+  const points = [{ x: 0, y: 0 }, { x: 10, y: 0 }];
+  const { splitPoint, arcToStart, arcToEnd } = splitPathAtMidpoint(points);
+  assert.deepEqual(splitPoint, { x: 5, y: 0 });
+  assert.deepEqual(arcToStart, [{ x: 5, y: 0 }, { x: 0, y: 0 }]);
+  assert.deepEqual(arcToEnd, [{ x: 5, y: 0 }, { x: 10, y: 0 }]);
+});
+
+test('splitPathAtMidpoint: both arcs always start with the same splitPoint', () => {
+  const points = [
+    { x: 0, y: 0 }, { x: 3, y: 1 }, { x: 6, y: -2 }, { x: 9, y: 4 }, { x: 12, y: 0 },
+  ];
+  const { splitPoint, arcToStart, arcToEnd } = splitPathAtMidpoint(points);
+  assert.deepEqual(arcToStart[0], splitPoint);
+  assert.deepEqual(arcToEnd[0], splitPoint);
+  // The two arcs' far ends are the path's true start and end.
+  assert.deepEqual(arcToStart[arcToStart.length - 1], points[0]);
+  assert.deepEqual(arcToEnd[arcToEnd.length - 1], points[points.length - 1]);
+});
+
+test('splitPathAtMidpoint: degenerate inputs (<2 points) do not crash', () => {
+  const single = splitPathAtMidpoint([{ x: 3, y: 4 }]);
+  assert.deepEqual(single.splitPoint, { x: 3, y: 4 });
+  const empty = splitPathAtMidpoint([]);
+  assert.deepEqual(empty.splitPoint, { x: 0, y: 0 });
 });

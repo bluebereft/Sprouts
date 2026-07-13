@@ -155,7 +155,7 @@ test('resolveMovePlacement: a self-loop around one dot puts it inside (side 1), 
   const getDotPosition = id => positions[id] ?? null;
 
   const { placement, exteriorSide } = resolveMovePlacement(
-    state, 0, 0, /*startCorner*/0, /*endCorner*/0, loop, getDotPosition
+    state, 0, 0, /*startCorner*/0, /*endCorner*/0, loop, getDotPosition, () => null
   );
   // K = {1, 2} (both siblings share the plane's outer region). Dot 1
   // enclosed → interior (side 1); dot 2 outside → exterior (side 2).
@@ -173,7 +173,7 @@ test('resolveMovePlacement: with no drawn enclosure, both siblings resolve to th
   const getDotPosition = id => positions[id] ?? null;
 
   const { placement, exteriorSide } = resolveMovePlacement(
-    state, 0, 0, 0, 0, loop, getDotPosition
+    state, 0, 0, 0, 0, loop, getDotPosition, () => null
   );
   // Nobody enclosed — both go to the exterior side (they stay roots).
   assert.deepEqual(placement, { 1: 2, 2: 2 });
@@ -189,9 +189,129 @@ test('resolveMovePlacement: a lone self-loop with no siblings returns empty plac
     { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }, { x: 0, y: 0 },
   ];
   const { placement, exteriorSide } = resolveMovePlacement(
-    state, 0, 0, 0, 0, loop, () => null
+    state, 0, 0, 0, 0, loop, () => null, () => null
   );
   // K = ∅ → no placement, no exterior side (ordinary lone loop).
   assert.deepEqual(placement, {});
   assert.equal(exteriorSide, null);
 });
+
+// ── PR 10b: interior side determined by real geometry ─────────────
+//
+// PR 10 shipped with interior/exterior assigned by dart numbering
+// rather than geometry — asymmetric depending on which dot drew the
+// loop (see migration-plan.md's PR 10 manual-playtest entry). These
+// tests exercise the actual fix: the loop owner's identity and the
+// drawing's winding direction must never change which occupant ends
+// up nested vs. staying a root. Assertions are made via containment
+// (parentAnchor) rather than by asserting exact side numbers, since
+// which abstract side (1 or 2) a physical face gets called is a
+// dart-numbering detail this fix deliberately makes irrelevant.
+
+import { applyMove } from '../js/engine/reducer.js';
+
+const squareLoopCW = [
+  { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 0, y: 0 },
+];
+const squareLoopCCW = [...squareLoopCW].reverse();
+
+function threeDotsFresh() {
+  return {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }, { id: 2, lives: 3 }],
+    edges: [], moves: [], initialDotCount: 3, startingPlayer: 0,
+    nextDotId: 3, ...buildInitialTopology(3),
+  };
+}
+
+for (const [ownerLabel, owner, outside] of [['dot 0', 0, 2], ['dot 2', 2, 0]]) {
+  for (const [windingLabel, drawnLoop] of [['CW', squareLoopCW], ['CCW', squareLoopCCW]]) {
+    test(`resolveMovePlacement: enclosure is correct regardless of loop owner or winding (owner=${ownerLabel}, ${windingLabel})`, () => {
+      const state = threeDotsFresh();
+      const enclosed = [0, 1, 2].find(id => id !== owner && id !== outside);
+      const positions = { [enclosed]: { x: 50, y: 50 }, [outside]: { x: 900, y: 900 } };
+      const getDotPosition = id => positions[id] ?? null;
+
+      const { startCorner, endCorner } = resolveMoveCorners(state, owner, owner, drawnLoop, () => null);
+      const { placement, exteriorSide } = resolveMovePlacement(
+        state, owner, owner, startCorner, endCorner, drawnLoop, getDotPosition, () => null
+      );
+      const result = applyMove(state, {
+        startDotId: owner, endDotId: owner, startCorner, endCorner, placement, exteriorSide,
+      });
+
+      assert.notEqual(result.parentAnchor[enclosed], null, 'enclosed dot must be nested (non-root)');
+      assert.equal(result.parentAnchor[outside], null, 'dot outside the loop must remain a root');
+    });
+  }
+}
+
+test('resolveMovePlacement: a non-convex (L-shaped) loop encloses correctly, including a dot in the notch', () => {
+  const state = threeDotsFresh();
+  // L-shape: full square minus its top-right quadrant.
+  const L = [
+    { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 },
+    { x: 50, y: 50 }, { x: 50, y: 100 }, { x: 0, y: 100 }, { x: 0, y: 0 },
+  ];
+  // dot 1 in the solid part (enclosed); dot 2 in the removed notch
+  // (NOT enclosed, even though it's within the L's bounding box).
+  const positions = { 1: { x: 20, y: 20 }, 2: { x: 70, y: 70 } };
+  const getDotPosition = id => positions[id] ?? null;
+
+  const { startCorner, endCorner } = resolveMoveCorners(state, 0, 0, L, () => null);
+  const { placement, exteriorSide } = resolveMovePlacement(
+    state, 0, 0, startCorner, endCorner, L, getDotPosition, () => null
+  );
+  const result = applyMove(state, { startDotId: 0, endDotId: 0, startCorner, endCorner, placement, exteriorSide });
+
+  assert.notEqual(result.parentAnchor[1], null, 'dot in the solid part must be nested');
+  assert.equal(result.parentAnchor[2], null, 'dot in the notch must remain a root');
+});
+
+test('resolveMovePlacement: a self-loop drawn from a dot that already has one edge still encloses correctly', () => {
+  // dot 1 gets one edge (to dot 0) first, via a plain merge, THEN
+  // self-loops enclosing dot 2, with sibling dot 3 outside.
+  const state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }, { id: 2, lives: 3 }, { id: 3, lives: 3 }],
+    edges: [], moves: [], initialDotCount: 4, startingPlayer: 0,
+    nextDotId: 4, ...buildInitialTopology(4),
+  };
+  const positions = {
+    0: { x: 500, y: 500 }, 1: { x: 0, y: 0 }, 2: { x: 20, y: 20 }, 3: { x: 900, y: 900 },
+  };
+  const getDotPosition = id => positions[id] ?? null;
+  const storedPaths = {};
+  const getEdgePath = mi => storedPaths[mi] ?? null;
+
+  const straight = [positions[1], { x: 250, y: 250 }, positions[0]];
+  const c0 = resolveMoveCorners(state, 1, 0, straight, getEdgePath);
+  const afterMerge = applyMove(state, { startDotId: 1, endDotId: 0, startCorner: c0.startCorner, endCorner: c0.endCorner, placement: null, exteriorSide: null });
+  storedPaths[0] = straight;
+
+  const loop2 = [
+    { x: 0, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 40 }, { x: 0, y: 40 }, { x: 0, y: 0 },
+  ];
+  const c1 = resolveMoveCorners(afterMerge, 1, 1, loop2, getEdgePath);
+  const { placement, exteriorSide } = resolveMovePlacement(
+    afterMerge, 1, 1, c1.startCorner, c1.endCorner, loop2, getDotPosition, getEdgePath
+  );
+  const result = applyMove(afterMerge, {
+    startDotId: 1, endDotId: 1, startCorner: c1.startCorner, endCorner: c1.endCorner, placement, exteriorSide,
+  });
+
+  assert.notEqual(result.parentAnchor[2], null, 'dot 2 (enclosed) must be nested');
+  assert.equal(result.parentAnchor[3], null, 'dot 3 (outside) must remain a root');
+});
+
+// ── Known residual limitation (PR 10c, not yet fixed) ──────────────
+//
+// A FOLLOW-UP move drawn INTO a region that was just created by an
+// enclosure (e.g. connecting the newly-enclosed dot back to the loop's
+// owner) can still be wrongly rejected. Root cause is separate from
+// the placement fix above: resolveCornerIndex's angle-based corner
+// picking does not correctly identify the right gap for a dot whose
+// existing darts came from a self-loop, because a self-loop's
+// "return" dart is registered at a reversed departure-equivalent
+// angle (a convention that is fine for PR 9's original insertion/
+// rendering purpose but does not describe which physical wedge is
+// which). This is NOT exercised or fixed here — see migration-plan.md's
+// PR 10c entry for the confirmed repro and scope.

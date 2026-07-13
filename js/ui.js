@@ -275,12 +275,15 @@ const UI = (() => {
     const { startCorner, endCorner } = resolveMoveCorners(
       engineStateBefore, a, b, path, BoardView.getEdgePath
     );
-    // PR 10: real enclosure resolution — if this move's loop encloses
-    // other components, derive π (which occupants land inside) and
-    // exteriorSide from the drawn curve's geometry. Non-enclosing
-    // moves get empty placement / null exteriorSide, unchanged.
+    // PR 10 (v1.0, corrected at PR 10b): real enclosure resolution —
+    // if this move's loop encloses other components, derive π (which
+    // occupants land inside) and exteriorSide from the drawn curve's
+    // real geometry (reconstructed face polygons / winding, not dart
+    // numbering). Non-enclosing moves get empty placement / null
+    // exteriorSide, unchanged.
     const { placement, exteriorSide } = resolveMovePlacement(
-      engineStateBefore, a, b, startCorner, endCorner, path, BoardView.getDotPosition
+      engineStateBefore, a, b, startCorner, endCorner, path,
+      BoardView.getDotPosition, BoardView.getEdgePath
     );
     const move = createMove(a, b, startCorner, endCorner, placement, exteriorSide);
     const result = Engine.apply(move);

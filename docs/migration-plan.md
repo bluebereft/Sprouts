@@ -1079,66 +1079,114 @@ least one side's own outer face), but this is not a proof, and the
 throw stays in place specifically so a wrong assumption fails loudly
 rather than corrupting state, exactly as designed.
 
-**PR 10b — Geometric interior-side resolution (browser bridge, design
-recorded, not yet implemented).** Objective: replace
-`resolveMovePlacement`'s hardcoded "inside → side 1" with a real
-geometric determination of which σ-side is the drawn loop's interior.
+**PR 10b — Geometric interior-side resolution (browser bridge).** ✅
+**COMPLETE, scoped** (see PR 10c below for what this does NOT yet
+fix). Objective: replace `resolveMovePlacement`'s hardcoded "inside →
+side 1" with a real geometric determination of which σ-side is the
+drawn loop's interior.
 
 Records why three earlier same-session attempts failed, so they're
 not retried: (a) ray-from-dot-toward-occupant — unsound for
 non-convex loops; (b) speculative-apply-as-oracle — the engine has no
 geometry, it just obeys whichever placement it's given, so both
 choices "succeed" and the probe can't discriminate; (c) whole-loop
-polygon per descendant face — a self-loop is ONE stored curve but
-TWO engine edges, so both faces' walks trace the same closed curve
-and point-in-polygon can't tell them apart.
+polygon per descendant face, reusing the SAME full path for both of a
+move's edges — a self-loop is ONE stored curve but TWO engine edges,
+so both faces' walks traced the same closed curve and point-in-polygon
+couldn't tell them apart. A fourth attempt (this one shipped) also
+needed one implementation-time correction: the first `newDarts`
+computation conflated `moveIndex` (`state.moves.length`) with
+`firstEdgeIndex` (`state.edges.length`, always 2×moveIndex) — caught
+by a direct probe (a fixture with a pre-existing edge produced
+obviously-wrong descendant faces), not by re-reasoning; fixed to use
+`state.edges.length` directly.
 
-Design, two mechanisms for two cases. (1) Split of a bounded interior
-face: descendant faces have genuinely different boundary polygons —
-speculatively apply, trace, build each face's polygon from real drawn
-paths (existing edges via `getEdgePath`, the just-drawn move's own
-TWO edges via a new `splitPathAtMidpoint` in pathGeometry.js that
-splits the drawn curve at the sprout's arc-length midpoint, sharing
-the arc-length walk with `arcLengthSplit` — single source of truth,
-PR 9 discipline). Occupants assigned per-polygon; no side convention
-needed; exteriorSide null. (2) Split of the plane's outer region (the
-actual enclosure case): both descendant walks trace the SAME curve
-with opposite winding, so point sets are identical and containment
-can't discriminate — but SIGNED AREA can. Because PR 9 inserts darts
-in true angular order, the rotation system is geometrically faithful,
-so bounded vs. unbounded faces have a FIXED, global, opposite sign —
-a single boolean constant, pinned empirically by hand-built fixtures
-(not re-derived by hand-reasoning, which is exactly the mistake that
-shipped Bug 1), and asserted by a mirror-pair test: the same
-enclosure drawn clockwise and counterclockwise must both resolve
-correctly — the test that would have caught Bug 1's asymmetry
-directly.
+**Implementation, two mechanisms for two cases** (confirmed necessary
+by direct testing, not assumed): (1) **Different-dot split** (e.g.
+connecting two distinct dots that already share a face): the drawn
+path is an open arc, and the two descendant faces have genuinely
+different boundary polygons once every edge on each one's walk is
+correctly split into its own two arcs via the new `splitPathAtMidpoint`
+(in pathGeometry.js, sharing `arcLengthSplit`'s arc-length walk — one
+source of truth for where a sprout sits and how its edges are
+geometrically shaped). Occupants are tested directly against the
+reconstructed polygons. (2) **Self-loop**: confirmed directly that
+polygon reconstruction degenerates here — with no other boundary
+structure to differentiate them, both descendant faces trace the
+SAME closed curve in opposite winding order, and point-in-polygon
+gives an identical answer for either (verified: both registered the
+same interior point as "contained"). So for a self-loop, occupants
+are tested against the raw drawn path directly (unambiguous — it's
+the actual physical curve), and which abstract side number is
+"interior" is learned by matching one reconstructed descendant's
+winding sign against the drawn path's own winding sign — the
+descendant traced in the same direction the loop was physically drawn
+is definitionally the bounded one. `exteriorSide` is only set when the
+split touches the touched component's own current root/⊥ face
+(Option 1's actual scope); left `null` otherwise (interior splits
+one level of nesting deeper).
 
 Spec: §7.2 placement now geometrically grounded; P-O3/R2 close fully
-(orientation isn't decidable from σ alone, but IS now resolved for
-browser play via the pinned sign convention, documented as such — not
-reopening the σ-level finding). Dependencies: PR 10a (oracle
-sequences need correct merge behaviour to test past the enclosure
-move); PR 9 (angular-order corner insertion is what makes the sign
-argument valid — explicitly does NOT hold for cornerless/
-convenience moves, which never reach this path). Public API:
-`pathGeometry.js` gains `splitPathAtMidpoint`; `cornerGeometry.js`'s
-`resolveMovePlacement` gains a `getEdgePath` param. No engine changes.
-Acceptance: the A-vs-C asymmetry pair both resolve correctly, in both
-winding directions; a non-convex (L-shaped) loop resolves correctly;
-Jared's full 3-move sequence's 4th move (an interior split after
-bisection) assigns occupants to the correct sub-region; a loop drawn
-from a dot with pre-existing edges resolves correctly; all 202 prior
-tests unaffected. Scope fence: engine stays geometry-free; cornerless
-moves explicitly unsupported for enclosure; missing stored-path
-fallback uses straight endpoint segments (documented, not fixed).
+for self-loops (orientation isn't decidable from σ alone, but IS now
+resolved for browser play via the pinned sign convention — the mirror
+CW/CCW test is the one that would have caught Bug 1's asymmetry
+directly, and does). Public API: `pathGeometry.js` gains
+`splitPathAtMidpoint`; `cornerGeometry.js`'s `resolveMovePlacement`
+gains a `getEdgePath` param, threaded through from `ui.js`'s existing
+`BoardView.getEdgePath`. No engine changes.
 
-Sequencing: 10a then 10b, each through full Design → Design Review →
-Implementation → Test → Implementation Review. Tech lead review
-requested for both, given each revises design claims from a PR that
-was already merged. No stopgap planned for the interim (enclosure
-play is a coin flip until 10b lands) — pre-release software, and a
-stopgap would churn rules.js twice for no user benefit.
+**Tests:** `tests/pathGeometry.test.js` (+4 for `splitPathAtMidpoint`,
+one hand-derivation error self-caught by a failing assertion and
+corrected in the comment, not papered over — the split lands on
+segment index 0, not 1, for the L-shaped fixture; house discipline
+held). `tests/cornerGeometry.test.js` (+6): the A-vs-C asymmetry pair
+crossed with both winding directions (4 cases, all asserting via
+containment — i.e. "is the enclosed dot nested and the outside dot
+still a root" — rather than exact side numbers, since which physical
+face gets called side 1 is exactly the dart-numbering detail this fix
+makes irrelevant); a non-convex L-shaped enclosure including a dot in
+the removed notch; a loop drawn from a dot with a pre-existing edge.
+214/214 tests passing (204 prior + 10 new).
+
+**PR 10c — Corner resolution does not correctly identify existing
+gaps created by a self-loop (found while verifying PR 10b end-to-end;
+NOT fixed, design not yet started).** While confirming PR 10b's fix
+with a full sequence (draw the enclosing loop, then draw a REAL
+follow-up curve from the enclosed dot back to the loop's owner), the
+follow-up move was wrongly rejected with `DIFFERENT_REGIONS` — even
+though the enclosed dot was correctly nested by PR 10b's fix.
+
+Traced to ground (not hand-reasoned): `resolveMoveCorners` (PR 9,
+untouched) picks the WRONG corner at the loop owner for the follow-up
+curve. The owner's two existing darts (from its own self-loop) are
+registered with departure angles using a convention — the "return"
+dart's angle is stored as the reverse of its true incoming direction,
+so it's comparable with the "departure" dart's angle in a single
+frame — that is correct and sufficient for PR 9's original purpose
+(sorting darts for insertion/rendering) but does NOT describe which
+physical wedge is which. Confirmed directly: for a specific loop, the
+gap that resolveCornerIndex's naive angle-in-gap reasoning would call
+"the interior wedge" is `cornerFace`'s OTHER corner from where the
+enclosed occupant actually landed. This is a genuine gap in PR 9's
+corner-resolution machinery for dots with self-loop-created edges,
+never previously exercised because nothing before PR 10 needed a
+follow-up move INTO a region an enclosure had just created.
+
+Scope for the eventual fix (not started): likely needs the SAME kind
+of real-geometry reconstruction PR 10b just built for placement (face
+polygons, or an equivalent), applied to corner resolution itself,
+rather than angle-in-gap comparison, specifically for vertices with
+self-loop-created darts. Confirmed repro is in the removed test scratch
+work (not committed); a fresh, minimal reproduction should be rebuilt
+as the first step of that PR's design, verified independently rather
+than assumed to match this description.
+
+Sequencing: 10a → 10b landed. 10c is a new, separately-scoped item —
+not blocking 10a/10b's landing, since the placement fix is real,
+verified, and does not regress anything; it simply means "draw a loop,
+then immediately connect into what you just enclosed" is not yet
+reliably playable end-to-end. Tech lead review requested for 10a/10b
+as already noted; 10c needs its own design pass before any code.
 
 ## Historic open items carried
 

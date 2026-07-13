@@ -35,16 +35,19 @@
        end-side.
 
    Depends on: engine/darts.js (edgeOfDart), engine/faces.js,
-               engine/containment.js (computeK), pathGeometry.js,
-               cornerResolution.js, regionGeometry.js.
+               engine/containment.js (computeK, splitDescendantFaces),
+               engine/reducer.js (applyMove, to see the post-move
+               face structure), pathGeometry.js, cornerResolution.js,
+               regionGeometry.js.
    ================================================================ */
 
 import { edgeOfDart } from './engine/darts.js';
-import { departureAngle, arcLengthSplit } from './pathGeometry.js';
+import { departureAngle, arcLengthSplit, splitPathAtMidpoint } from './pathGeometry.js';
 import { resolveCornerIndex } from './cornerResolution.js';
 import { traceFaces, getComponents, cornerFace } from './engine/faces.js';
-import { computeK } from './engine/containment.js';
-import { partitionByEnclosure } from './regionGeometry.js';
+import { computeK, splitDescendantFaces, resolveOuterFaceAnchor } from './engine/containment.js';
+import { applyMove } from './engine/reducer.js';
+import { pointInPolygon, signedArea, partitionByEnclosure } from './regionGeometry.js';
 
 /**
  * Computes the departure angle of a single dart, using whichever
@@ -126,25 +129,19 @@ export function resolveMoveCorners(state, startDotId, endDotId, path, getEdgePat
 
 /**
  * Resolves a split move's placement π and exteriorSide from the
- * drawn curve's geometry (PR 10). Only meaningful for a move that
- * splits a region containing occupant components (K ≠ ∅); returns
- * empty placement / null exteriorSide otherwise, so the ordinary
- * (non-enclosing) case is unaffected.
+ * drawn curve's geometry (PR 10, corrected at PR 10b).
  *
- * Convention (self-consistent by construction — see the reducer's
- * updateContainmentForSplit): side 2 is declared the exterior
- * (⊥-adjacent) side. Occupants the drawn loop ENCLOSES go to the
- * interior, side 1 (→ nested); occupants OUTSIDE the loop go to
- * side 2 (→ stay roots). The engine's σ-based side ordering decides
- * which physical face is called side 1, but that choice is
- * immaterial: interior occupants are nested into a genuine bounded
- * face either way, which is exactly what enclosing them means.
- *
- * This is only invoked for a self-loop split (startDotId ===
- * endDotId). A non-loop move is a merge (no K); a same-component
- * cross-face move is illegal upstream (DIFFERENT_REGIONS). For a
- * split whose corners differ, the same enclosure logic applies —
- * the loopPath is still the drawn curve bounding the enclosed area.
+ * PR 10 shipped a bug here (found via Jared's manual playtest, see
+ * migration-plan.md's PR 10/10b entries): it assumed "inside the
+ * drawn loop → side 1" always, but which physical σ-face is called
+ * side 1 is decided by dart numbering, unrelated to which face the
+ * loop geometrically encloses. PR 10b fixes this by actually
+ * reconstructing each descendant face's real screen polygon — from
+ * the drawn geometry of every edge on its boundary walk, each split
+ * into its own two arcs via pathGeometry's splitPathAtMidpoint at
+ * the point where ITS move's sprout sits — and testing occupants
+ * against the reconstructed polygons directly, not against a fixed
+ * side-number convention.
  *
  * @param {object} state — engine state BEFORE the move
  * @param {number} startDotId
@@ -153,10 +150,11 @@ export function resolveMoveCorners(state, startDotId, endDotId, path, getEdgePat
  * @param {number} endCorner
  * @param {Array<{x:number,y:number}>} path — the drawn curve
  * @param {(dotId:number) => ?{x:number,y:number}} getDotPosition
+ * @param {(moveIndex:number) => ?Array<{x:number,y:number}>} getEdgePath
  * @returns {{ placement: object, exteriorSide: ?number }}
  */
 export function resolveMovePlacement(
-  state, startDotId, endDotId, startCorner, endCorner, path, getDotPosition
+  state, startDotId, endDotId, startCorner, endCorner, path, getDotPosition, getEdgePath
 ) {
   const faces = traceFaces(state.edges, state.rotations);
   const startFace = cornerFace(state.edges, state.rotations, faces, startDotId, startCorner);
@@ -177,21 +175,126 @@ export function resolveMovePlacement(
     return { placement: {}, exteriorSide: null };
   }
 
-  // Each occupant rep is named by its representative vertex id; use
-  // that vertex's screen position as the test point. (A component's
-  // representative is a real vertex — spec §10.2 — so it always has
-  // a position once drawn.)
-  const candidates = K
-    .map(occRep => ({ id: occRep, point: getDotPosition(occRep) }))
+  const candidates = K.map(occRep => ({ id: occRep, point: getDotPosition(occRep) }))
     .filter(c => c.point != null);
 
-  const { inside } = partitionByEnclosure(path, candidates.map(c => ({ id: c.id, point: c.point })));
-  const insideSet = new Set(inside);
+  // Reconstruct at least one descendant face's real screen polygon —
+  // needed either to test occupants directly against it (different-
+  // dot split) or just to learn its winding sign (self-loop; see
+  // below for why a self-loop needs a different mechanism).
+  const thisMoveIndex = state.moves.length;
+  const trial = applyMove(state, {
+    startDotId, endDotId, startCorner, endCorner, placement: {}, exteriorSide: null,
+  });
+  const newFaces = traceFaces(trial.edges, trial.rotations);
+  const firstEdgeIndex = state.edges.length; // edges only ever grow by 2, once per move
+  const newDarts = [
+    2 * firstEdgeIndex, 2 * firstEdgeIndex + 1,
+    2 * (firstEdgeIndex + 1), 2 * (firstEdgeIndex + 1) + 1,
+  ];
+  const descendants = splitDescendantFaces(newFaces, rep, newDarts);
+  const getPathFor = moveIndex => (moveIndex === thisMoveIndex ? path : getEdgePath(moveIndex));
 
-  const placement = {};
-  for (const occRep of K) {
-    placement[occRep] = insideSet.has(occRep) ? 1 : 2; // inside→interior(1), outside→exterior(2)
+  let placement;
+  let insideSideForExterior; // the side occupants OUTSIDE the drawn shape land on
+
+  if (startDotId === endDotId) {
+    // SELF-LOOP: the drawn path is already one complete closed curve.
+    // Reconstructing "both sides' polygons" and testing containment
+    // against them does NOT work here — with no other boundary
+    // structure to differentiate them (the common case: an isolated
+    // or near-isolated dot), both descendants trace the SAME closed
+    // curve, just in opposite winding order, so point-in-polygon
+    // gives the identical "inside" answer for either one and cannot
+    // tell them apart (confirmed directly: both register the same
+    // point as contained). Winding CAN tell them apart. So: test
+    // occupants against the raw drawn path directly (unambiguous —
+    // it's the actual physical loop), then learn which abstract side
+    // number is "the interior" by checking which descendant's own
+    // reconstructed winding matches the drawn path's winding sign
+    // (the descendant traced in the SAME direction the loop was
+    // physically drawn is definitionally the bounded/interior one).
+    const { inside } = partitionByEnclosure(path, candidates);
+    const insideSet = new Set(inside);
+
+    const poly0 = facePolygon(descendants[0], trial.edges, getPathFor);
+    const drawnSign = Math.sign(signedArea(path)) || 1;
+    const side0Sign = Math.sign(signedArea(poly0)) || 1;
+    const interiorSide = (side0Sign === drawnSign) ? 1 : 2;
+    const exteriorCandidateSide = interiorSide === 1 ? 2 : 1;
+
+    placement = {};
+    for (const occRep of K) {
+      placement[occRep] = insideSet.has(occRep) ? interiorSide : exteriorCandidateSide;
+    }
+    insideSideForExterior = exteriorCandidateSide;
+  } else {
+    // DIFFERENT-DOT SPLIT: the drawn path is an open arc, not a
+    // closed curve — there is no single "inside the drawn shape" to
+    // test against directly. Reconstruct BOTH descendants' real
+    // polygons (from every edge on each one's boundary walk, current
+    // move's own two edges included) and test occupants against them
+    // directly — this works because with genuine extra boundary
+    // structure (at least one pre-existing edge on one of the two
+    // touched dots), the two descendants are genuinely different
+    // shapes, unlike the self-loop-on-an-isolated-dot degenerate case.
+    const polygons = descendants.map(face => facePolygon(face, trial.edges, getPathFor));
+    placement = {};
+    for (const { id, point } of candidates) {
+      placement[id] = pointInPolygon(point, polygons[1]) ? 2 : 1;
+    }
+    for (const occRep of K) {
+      if (!(occRep in placement)) placement[occRep] = 1; // missing position — defensive default
+    }
+    insideSideForExterior = 2;
   }
 
-  return { placement, exteriorSide: 2 };
+  // exteriorSide: only meaningful when this split touches the
+  // touched component's OWN current outer face while it's still a
+  // root (splitting the shared plane's outer region — the only case
+  // Option 1's root-normalisation applies to; see containment.js).
+  // Scoped to self-loops in practice — see migration-plan.md's PR 10b
+  // residual note for the (unverified, likely rare) different-dot
+  // case of connecting two dots both on a root's own outer face.
+  const outerAnchorFace = resolveOuterFaceAnchor(faces, state.outerFaceAnchor[rep]);
+  const isRoot = state.parentAnchor[rep] === null || state.parentAnchor[rep] === undefined;
+  const exteriorSide = (isRoot && outerAnchorFace === startFace) ? insideSideForExterior : null;
+
+  return { placement, exteriorSide };
+}
+
+/**
+ * Builds a screen-coordinate polygon tracing a face's boundary walk,
+ * by concatenating each dart's own arc of its edge's drawn curve.
+ *
+ * Every edge's stored path is split at ITS OWN move's sprout point
+ * (pathGeometry's splitPathAtMidpoint) into two arcs — arcToStart
+ * (toward that move's startDotId side) and arcToEnd (toward its
+ * endDotId side). A dart whose origin is the "old" endpoint
+ * (d % 2 === 0) traverses FROM that endpoint TOWARD the sprout —
+ * the reverse of the arc as stored (which runs sprout→endpoint); a
+ * dart whose origin IS that move's sprout (d % 2 === 1) traverses in
+ * the arc's stored order directly.
+ *
+ * @param {{darts:number[]}} face
+ * @param {Array<{a:number,b:number,originatingMoveIndex:number}>} edges
+ * @param {(moveIndex:number) => ?Array<{x:number,y:number}>} getPathFor
+ * @returns {Array<{x:number,y:number}>}
+ */
+function facePolygon(face, edges, getPathFor) {
+  const points = [];
+  for (const dart of face.darts) {
+    const edgeIndex = edgeOfDart(dart);
+    const edge = edges[edgeIndex];
+    const moveIndex = edge.originatingMoveIndex;
+    const fullPath = getPathFor(moveIndex);
+    if (!fullPath || fullPath.length < 2) continue; // no geometry available — skip
+
+    const isStartSide = edgeIndex === 2 * moveIndex;
+    const { arcToStart, arcToEnd } = splitPathAtMidpoint(fullPath);
+    const arc = isStartSide ? arcToStart : arcToEnd;
+    const oriented = (dart % 2 === 0) ? [...arc].reverse() : arc;
+    for (const p of oriented) points.push(p);
+  }
+  return points;
 }

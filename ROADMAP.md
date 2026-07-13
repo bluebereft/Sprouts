@@ -539,24 +539,40 @@ feature gaps, sequenced as follows (agreed July 2026):
   done.
 - **PR 10 — Nonempty-K placement (enclosure).** ✅ **COMPLETE** —
   moves that enclose other components (looping a line around other
-  dots) are now handled correctly, engine + browser (Option B, one
-  PR). Root cause was `computeK` not seeing sibling root components
-  sharing the plane's outer region; fixed via a ⊥-region branch. The
-  reducer now redistributes enclosed occupants to the two sides of a
-  split per a placement π, and the browser derives π from the drawn
-  curve's geometry (point-in-polygon) — so looping around a dot really
-  encloses it. A Move gained an `exteriorSide` field so occupants left
-  outside the loop stay roots (canonical). Literature-checked against
-  Čížek & Balko first (confirmed the split partition needs geometry,
-  validating the π design). 202/202 tests, including an exhaustive
-  walker that now generates every enclosure outcome up to depth 2.
-  Residual: merge of a nested component still unexercised (PR 11 may
-  surface it); full face-naming canonicalisation is Phase 2; live
-  pointer-drag needs a manual playtest (no DOM harness). See
-  docs/migration-plan.md for the full record.
+  dots) are handled by the engine, but a manual playtest (Jared)
+  found two real bugs before this was actually playable — see
+  PR 10a/10b below. 202/202 tests at initial completion.
+- **PR 10a — Merge must preserve containment.** ✅ **COMPLETE** —
+  connecting a loop's owner to its own enclosed occupant no longer
+  corrupts containment (was silently overwriting the owner's real
+  exterior anchor). Also fixed a latent test-walker bug this surfaced
+  (cornerless cross-component moves could be region-illegal without
+  anything checking). 204/204 tests.
+- **PR 10b — Geometric interior-side resolution.** ✅ **COMPLETE,
+  scoped** — enclosure placement (which occupant lands inside vs.
+  outside a drawn loop) is now determined from real screen geometry
+  (reconstructed face polygons, or winding sign for self-loops)
+  instead of dart numbering, fixing an asymmetry bug where the same
+  enclosure worked from one dot but not another. 214/214 tests,
+  including the exact mirror-pair (CW/CCW) test that catches that
+  asymmetry directly. **Known residual, not yet fixed — PR 10c**:
+  drawing a follow-up curve INTO a freshly-enclosed region can still
+  be wrongly rejected, due to a separate, pre-existing gap in PR 9's
+  corner resolution for dots with self-loop-created edges. See
+  docs/migration-plan.md for the full record and repro.
+- **PR 10c — Corner resolution for self-loop-adjacent dots (not yet
+  started).** A follow-up move drawn into a region an enclosure just
+  created can resolve to the wrong corner at the loop's owner,
+  because a self-loop's "return" dart is angle-registered in a
+  reversed convention that's fine for insertion/rendering but doesn't
+  describe which physical wedge is which. Needs its own design pass —
+  likely the same kind of real-geometry reconstruction PR 10b just
+  built for placement, applied to corner resolution itself.
 - **PR 11 — Legal move enumeration + `hasLegalMove` + game-over
-  detection.** Correct by construction once PR 10 lands. Foundation
-  for puzzle Tier 1's generator/classifier and every future bot.
+  detection.** Needs PR 10c first — otherwise enumeration would
+  inherit the same "follow-up move into an enclosure" blind spot.
+  Foundation for puzzle Tier 1's generator/classifier and every
+  future bot.
 - **PR 12 — Crossing detection integrated into engine rules,** reusing
   the geometry primitives that already exist from v0.7
   (`crossingDetection.js`) — their fit against the new corner/
