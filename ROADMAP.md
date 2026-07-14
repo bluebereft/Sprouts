@@ -555,24 +555,28 @@ feature gaps, sequenced as follows (agreed July 2026):
   instead of dart numbering, fixing an asymmetry bug where the same
   enclosure worked from one dot but not another. 214/214 tests,
   including the exact mirror-pair (CW/CCW) test that catches that
-  asymmetry directly. **Known residual, not yet fixed — PR 10c**:
-  drawing a follow-up curve INTO a freshly-enclosed region can still
-  be wrongly rejected, due to a separate, pre-existing gap in PR 9's
-  corner resolution for dots with self-loop-created edges. See
-  docs/migration-plan.md for the full record and repro.
-- **PR 10c — Corner resolution for self-loop-adjacent dots (not yet
-  started).** A follow-up move drawn into a region an enclosure just
-  created can resolve to the wrong corner at the loop's owner,
-  because a self-loop's "return" dart is angle-registered in a
-  reversed convention that's fine for insertion/rendering but doesn't
-  describe which physical wedge is which. Needs its own design pass —
-  likely the same kind of real-geometry reconstruction PR 10b just
-  built for placement, applied to corner resolution itself.
+  asymmetry directly. Residual found while verifying end-to-end
+  (drawing a follow-up curve into a freshly-enclosed region could
+  still be wrongly rejected) turned out to be a separate, pre-existing
+  gap in PR 9's corner resolution — fixed at PR 10c, below.
+- **PR 10c — Corner resolution for dots with self-loop-created darts.**
+  ✅ **COMPLETE** — a follow-up move drawn into a region an enclosure
+  just created now correctly resolves to the right corner at the
+  loop's owner. Root cause confirmed by direct testing (not
+  hand-reasoning): a self-loop's two "existing angle" values don't
+  describe two independent departure rays the way naive angle-gap
+  comparison assumes — verified specific to self-loop-adjacent dots
+  via a control fixture (a real triangle, zero self-loops, where the
+  same angle-gap logic works correctly). Fix: geometrically verify
+  every angle-gap corner candidate by reconstructing its real face
+  polygon and testing the drawn curve's actual next point against it,
+  falling back to winding-number sign (a new `windingNumber` primitive)
+  compared against the reference loop's own winding when a pure
+  self-loop's two sides are geometrically indistinguishable by plain
+  containment. 222/222 tests.
 - **PR 11 — Legal move enumeration + `hasLegalMove` + game-over
-  detection.** Needs PR 10c first — otherwise enumeration would
-  inherit the same "follow-up move into an enclosure" blind spot.
-  Foundation for puzzle Tier 1's generator/classifier and every
-  future bot.
+  detection.** Foundation for puzzle Tier 1's generator/classifier and
+  every future bot.
 - **PR 12 — Crossing detection integrated into engine rules,** reusing
   the geometry primitives that already exist from v0.7
   (`crossingDetection.js`) — their fit against the new corner/

@@ -47,7 +47,7 @@ import { resolveCornerIndex } from './cornerResolution.js';
 import { traceFaces, getComponents, cornerFace } from './engine/faces.js';
 import { computeK, splitDescendantFaces, resolveOuterFaceAnchor } from './engine/containment.js';
 import { applyMove } from './engine/reducer.js';
-import { pointInPolygon, signedArea, partitionByEnclosure } from './regionGeometry.js';
+import { pointInPolygon, signedArea, partitionByEnclosure, windingNumber } from './regionGeometry.js';
 
 /**
  * Computes the departure angle of a single dart, using whichever
@@ -116,15 +116,116 @@ export function existingAngles(state, dotId, getEdgePath) {
  * @returns {{ startCorner: number, endCorner: number }}
  */
 export function resolveMoveCorners(state, startDotId, endDotId, path, getEdgePath) {
-  const startExisting = existingAngles(state, startDotId, getEdgePath);
-  const endExisting    = (endDotId === startDotId)
-    ? startExisting
-    : existingAngles(state, endDotId, getEdgePath);
-
-  const startCorner = resolveCornerIndex(startExisting, departureAngle(path, 'start'));
-  const endCorner    = resolveCornerIndex(endExisting, departureAngle(path, 'end'));
-
+  const startCorner = resolveEndpointCorner(state, startDotId, path, 'start', getEdgePath);
+  const endCorner   = resolveEndpointCorner(state, endDotId, path, 'end', getEdgePath);
   return { startCorner, endCorner };
+}
+
+/**
+ * Resolves ONE endpoint's corner: the naive angle-gap answer from
+ * resolveCornerIndex, geometrically VERIFIED and corrected if wrong
+ * (PR 10c).
+ *
+ * Why verification is needed, not just angle-gap arithmetic (found
+ * via Jared's manual playtest — see migration-plan.md's PR 10c
+ * entry, confirmed by direct testing, not assumed): a self-loop's
+ * two "existing angle" values don't describe two independent
+ * departure rays the way a gap-membership test assumes — they're the
+ * two cut ends of one bent curve, and which side is which depends on
+ * the loop's actual drawn shape, not just its two endpoint angles.
+ * Confirmed a real case where the new curve's angle unambiguously
+ * falls inside the naive candidate's gap under any normal reading,
+ * yet the geometrically/topologically correct corner is the OTHER
+ * one. Also confirmed (a genuine triangle fixture, zero self-loops)
+ * that angle-gap arithmetic IS correct for ordinary structures — so
+ * this isn't a general PR 9 bug, just one specific blind spot.
+ *
+ * Rather than detect "is this dart self-loop-adjacent" as a special
+ * case, verification runs uniformly whenever a corner choice is even
+ * possible (degree ≥ 2): reconstruct the naive candidate's actual
+ * face polygon (same construction resolveMovePlacement's
+ * facePolygon uses) and confirm the drawn curve's own next point
+ * genuinely falls inside it. If not, search the other corners for
+ * one that does. Degree ≤ 1 skips this — only one corner exists,
+ * unambiguous by construction.
+ *
+ * @param {object} state — engine state BEFORE the move
+ * @param {number} dotId
+ * @param {Array<{x:number,y:number}>} path — the drawn curve
+ * @param {'start'|'end'} end — which end of the path this dot is
+ * @param {(moveIndex:number) => ?Array<{x:number,y:number}>} getEdgePath
+ * @returns {number} corner index
+ */
+function resolveEndpointCorner(state, dotId, path, end, getEdgePath) {
+  const existing = existingAngles(state, dotId, getEdgePath);
+  const naive = resolveCornerIndex(existing, departureAngle(path, end));
+  const degree = existing.length;
+  if (degree < 2) return naive;
+
+  // The drawn curve's own next point after this endpoint — real
+  // geometry showing exactly where the curve actually goes, used as
+  // the test point rather than any position derived from angles.
+  const testPoint = (end === 'start') ? path[1] : path[path.length - 2];
+  if (!testPoint) return naive;
+
+  const faces = traceFaces(state.edges, state.rotations);
+
+  // Test EVERY candidate corner's reconstructed face polygon against
+  // the drawn curve's real next point, collecting both a containment
+  // answer and a winding number for each. Containment alone decides
+  // it when the candidates disagree (the ordinary case — confirmed
+  // against a genuine multi-edge structure with no self-loop
+  // involved). When containment does NOT discriminate (every
+  // candidate agrees) — confirmed to happen exactly when a pure
+  // self-loop's two reconstructed "sides" trace the same physical
+  // curve in opposite directions, so pointInPolygon's even-odd test
+  // gives them the identical answer — the SIGN of the winding number
+  // does discriminate (opposite for the two directions), pinned
+  // against a real enclosure fixture, not re-derived by hand
+  // (avoiding the mistake that shipped PR 10's original bug).
+  const candidates = [];
+  for (let c = 0; c < degree; c++) {
+    const face = cornerFace(state.edges, state.rotations, faces, dotId, c);
+    if (!face) continue;
+    const poly = facePolygon(face, state.edges, getEdgePath);
+    if (poly.length < 3) continue;
+    candidates.push({
+      corner: c,
+      contains: pointInPolygon(testPoint, poly),
+      winding: windingNumber(testPoint, poly),
+      face,
+    });
+  }
+  if (candidates.length === 0) return naive;
+
+  const containing = candidates.filter(c => c.contains);
+  if (containing.length === 1) {
+    return containing[0].corner; // unambiguous — the ordinary case
+  }
+  if (containing.length > 1) {
+    // Degenerate: multiple (reconstructed-identically) candidates all
+    // "contain" the point — pointInPolygon's even-odd test cannot
+    // discriminate a curve traced in opposite directions. Winding
+    // number CAN, but only relative to the ACTUAL drawn geometry, not
+    // a fixed sign (confirmed by testing both a clockwise- and a
+    // counterclockwise-drawn loop: a fixed "always positive" rule
+    // matched one and was wrong for the other). Find the raw path
+    // that created the ambiguous darts (in this degenerate case, all
+    // of them share one originating move) and use ITS OWN winding
+    // number at the test point as the reference sign; the correct
+    // candidate is whichever one matches it.
+    const anyDart = containing[0].face.darts[0];
+    const refMoveIndex = state.edges[edgeOfDart(anyDart)].originatingMoveIndex;
+    const refPath = getEdgePath(refMoveIndex);
+    if (refPath) {
+      const refWinding = windingNumber(testPoint, refPath);
+      const matching = containing.find(c => Math.sign(c.winding) === Math.sign(refWinding) && c.winding !== 0);
+      if (matching) return matching.corner;
+    }
+    return containing[0].corner; // inconclusive — deterministic fallback
+  }
+
+  return naive; // inconclusive (e.g. missing stored-path data) — safe fallback
 }
 
 /**

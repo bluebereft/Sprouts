@@ -1148,45 +1148,84 @@ makes irrelevant); a non-convex L-shaped enclosure including a dot in
 the removed notch; a loop drawn from a dot with a pre-existing edge.
 214/214 tests passing (204 prior + 10 new).
 
-**PR 10c — Corner resolution does not correctly identify existing
-gaps created by a self-loop (found while verifying PR 10b end-to-end;
-NOT fixed, design not yet started).** While confirming PR 10b's fix
-with a full sequence (draw the enclosing loop, then draw a REAL
-follow-up curve from the enclosed dot back to the loop's owner), the
-follow-up move was wrongly rejected with `DIFFERENT_REGIONS` — even
-though the enclosed dot was correctly nested by PR 10b's fix.
+**PR 10c — Corner resolution for dots with self-loop-created darts.**
+✅ **COMPLETE.** While confirming PR 10b's fix with a full sequence
+(draw the enclosing loop, then draw a REAL follow-up curve from the
+enclosed dot back to the loop's owner), the follow-up move was
+wrongly rejected with `DIFFERENT_REGIONS` — even though the enclosed
+dot was correctly nested by PR 10b's fix.
 
-Traced to ground (not hand-reasoned): `resolveMoveCorners` (PR 9,
-untouched) picks the WRONG corner at the loop owner for the follow-up
-curve. The owner's two existing darts (from its own self-loop) are
-registered with departure angles using a convention — the "return"
-dart's angle is stored as the reverse of its true incoming direction,
-so it's comparable with the "departure" dart's angle in a single
-frame — that is correct and sufficient for PR 9's original purpose
-(sorting darts for insertion/rendering) but does NOT describe which
-physical wedge is which. Confirmed directly: for a specific loop, the
-gap that resolveCornerIndex's naive angle-in-gap reasoning would call
-"the interior wedge" is `cornerFace`'s OTHER corner from where the
-enclosed occupant actually landed. This is a genuine gap in PR 9's
-corner-resolution machinery for dots with self-loop-created edges,
-never previously exercised because nothing before PR 10 needed a
-follow-up move INTO a region an enclosure had just created.
+**Root cause, confirmed by direct testing, not hand-reasoning:**
+`resolveMoveCorners` (PR 9, otherwise untouched) picks the WRONG
+corner at the loop owner for the follow-up curve. Built a clean repro
+first: for a self-loop's two existing angles, the new curve's angle
+unambiguously falls within the naive candidate's gap under any normal
+reading, yet the topologically correct corner (verified against where
+the enclosed occupant was actually nested) is the OTHER one — no
+remapping of angle *values* can fix this, since the angle genuinely
+belongs to the wrong gap's arithmetic. Separately confirmed (a genuine
+triangle fixture — three real edges, two real faces, zero self-loops)
+that angle-gap arithmetic IS correct for ordinary structures, so this
+is a self-loop-specific blind spot, not a general PR 9 defect: a
+self-loop's two "existing angle" values don't describe two independent
+departure rays the way gap-membership assumes — they're the two cut
+ends of one bent curve, and which side is which depends on the loop's
+actual drawn shape, exactly the same class of problem PR 10b already
+solved for placement.
 
-Scope for the eventual fix (not started): likely needs the SAME kind
-of real-geometry reconstruction PR 10b just built for placement (face
-polygons, or an equivalent), applied to corner resolution itself,
-rather than angle-in-gap comparison, specifically for vertices with
-self-loop-created darts. Confirmed repro is in the removed test scratch
-work (not committed); a fresh, minimal reproduction should be rebuilt
-as the first step of that PR's design, verified independently rather
-than assumed to match this description.
+**Fix:** `resolveMoveCorners`'s per-endpoint resolution now
+geometrically verifies the naive angle-gap answer instead of trusting
+it outright. For every corner candidate (not just self-loop-adjacent
+ones — verification is cheap and runs uniformly whenever a choice is
+even possible, degree ≥ 2, rather than special-casing "is this a
+self-loop"), it reconstructs the candidate's real face polygon (same
+`facePolygon`/`splitPathAtMidpoint` construction PR 10b built) and
+tests the drawn curve's own next point against it. When exactly one
+candidate contains the point, that decides it (confirmed unaffected
+on the triangle fixture). When multiple candidates agree — the exact
+self-loop degeneracy, where both "sides" reconstruct as the same
+physical curve traced in opposite directions, so pointInPolygon's
+even-odd test cannot tell them apart — a new `windingNumber` primitive
+(regionGeometry.js) breaks the tie, compared against the *reference*
+loop's own winding at that point, not a fixed sign convention. This
+needed one implementation-time correction of its own: a first attempt
+used "always pick positive winding," which passed for a clockwise-drawn
+loop and was then found wrong for a counterclockwise one — caught by
+testing the mirror case directly (the exact discipline PR 10b's own
+review had just called out), not assumed correct after one success.
 
-Sequencing: 10a → 10b landed. 10c is a new, separately-scoped item —
-not blocking 10a/10b's landing, since the placement fix is real,
-verified, and does not regress anything; it simply means "draw a loop,
-then immediately connect into what you just enclosed" is not yet
-reliably playable end-to-end. Tech lead review requested for 10a/10b
-as already noted; 10c needs its own design pass before any code.
+**Public API:** `js/regionGeometry.js` gains `windingNumber`. No
+engine changes, no Move shape changes — this is purely a browser-layer
+correction to how `resolveMoveCorners` picks among already-legal
+corner candidates.
+
+**Tests:** `tests/regionGeometry.test.js` (+3): opposite sign for the
+same curve traced in both directions (the exact property the fix
+relies on), zero for a genuinely external point, degenerate-input
+safety. `tests/cornerGeometry.test.js` (+5): the mirror-pair follow-up
+join (loop owner = dot 0 or dot 2, drawn CW or CCW — 4 cases, the
+same matrix PR 10b's own asymmetry test uses, now extended one move
+further to the actual follow-up join) all validate as legal; a
+follow-up join to a self-loop's own sprout when the owner already had
+a pre-existing edge (and is itself now fully exhausted, matching real
+Sprouts rules) also validates. One pre-existing test fixture
+(`isolatedDot3` in two PR 9-era tests) needed fixing: it faked
+"extending the rotations array" via object-spread, producing a plain
+object rather than a real Array — harmless for the old code (which
+never iterated it structurally) but a hard crash once `traceFaces`
+needed a genuine array; fixed by building a real array explicitly,
+same discipline as PR 10a's fixture fixes. 222/222 tests passing (214
+prior + 8 new).
+
+**Residual, explicit:** verification is now geometry-dependent — a
+missing stored path (e.g. an edge whose drawn curve wasn't captured)
+falls back to the naive angle-gap answer rather than crashing, but in
+that specific circumstance the self-loop blind spot this PR fixes
+could theoretically reappear; not expected to arise in live browser
+play, since `ui.js` always has every prior move's path available in
+the same session. Cost is one extra `traceFaces`/polygon reconstruction
+per corner resolution when degree ≥ 2 — trivial for a turn-based game
+at Sprouts' scale, not benchmarked, not expected to matter.
 
 ## Historic open items carried
 

@@ -90,7 +90,13 @@ test('resolveMoveCorners: new curve heading north from the sprout resolves to ga
   // Dot 2 sits at (5,0) (this move's own arithmetic doesn't need
   // that fact — only the NEW path's own geometry matters here).
   const newPath = [{ x: 5, y: 0 }, { x: 5, y: -10 }]; // north: y decreases
-  const isolatedDot3 = { rotations: { ...twoDotState.rotations, 3: [] }, edges: twoDotState.edges };
+  // PR 10c: resolveMoveCorners now geometrically verifies via
+  // traceFaces, which requires a genuine Array (not an object with
+  // numeric keys) for rotations — build isolatedDot3 as a real array.
+  const isolatedDot3 = {
+    rotations: [twoDotState.rotations[0], twoDotState.rotations[1], twoDotState.rotations[2], []],
+    edges: twoDotState.edges,
+  };
   const { startCorner, endCorner } = resolveMoveCorners(isolatedDot3, 2, 3, newPath, getPath0);
   assert.equal(startCorner, 0, 'north-heading departure lands in gap 0 (the upper half)');
   assert.equal(endCorner, 0, 'dot 3 is isolated — degree-0 always resolves to corner 0');
@@ -98,7 +104,10 @@ test('resolveMoveCorners: new curve heading north from the sprout resolves to ga
 
 test('resolveMoveCorners: new curve heading south from the sprout resolves to gap 1', () => {
   const newPath = [{ x: 5, y: 0 }, { x: 5, y: 10 }]; // south: y increases
-  const isolatedDot3 = { rotations: { ...twoDotState.rotations, 3: [] }, edges: twoDotState.edges };
+  const isolatedDot3 = {
+    rotations: [twoDotState.rotations[0], twoDotState.rotations[1], twoDotState.rotations[2], []],
+    edges: twoDotState.edges,
+  };
   const { startCorner } = resolveMoveCorners(isolatedDot3, 2, 3, newPath, getPath0);
   assert.equal(startCorner, 1, 'south-heading departure lands in gap 1 (the lower half)');
 });
@@ -209,6 +218,7 @@ test('resolveMovePlacement: a lone self-loop with no siblings returns empty plac
 // dart-numbering detail this fix deliberately makes irrelevant.
 
 import { applyMove } from '../js/engine/reducer.js';
+import { validateMove } from '../js/engine/rules.js';
 
 const squareLoopCW = [
   { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 0, y: 0 },
@@ -302,16 +312,113 @@ test('resolveMovePlacement: a self-loop drawn from a dot that already has one ed
   assert.equal(result.parentAnchor[3], null, 'dot 3 (outside) must remain a root');
 });
 
-// ── Known residual limitation (PR 10c, not yet fixed) ──────────────
+// ── PR 10c: follow-up move into a freshly-enclosed region ──────────
 //
-// A FOLLOW-UP move drawn INTO a region that was just created by an
-// enclosure (e.g. connecting the newly-enclosed dot back to the loop's
-// owner) can still be wrongly rejected. Root cause is separate from
-// the placement fix above: resolveCornerIndex's angle-based corner
-// picking does not correctly identify the right gap for a dot whose
-// existing darts came from a self-loop, because a self-loop's
-// "return" dart is registered at a reversed departure-equivalent
-// angle (a convention that is fine for PR 9's original insertion/
-// rendering purpose but does not describe which physical wedge is
-// which). This is NOT exercised or fixed here — see migration-plan.md's
-// PR 10c entry for the confirmed repro and scope.
+// Found while verifying PR 10b end-to-end (Jared's exact manual
+// playtest sequence): a REAL follow-up curve drawn from the enclosed
+// dot back to the loop's owner was wrongly rejected, even though the
+// enclosed dot was correctly nested by PR 10b. Root cause: a
+// self-loop's two "existing angle" values don't describe two
+// independent departure rays the way naive angle-gap comparison
+// assumes — confirmed directly with a case where the new curve's
+// angle unambiguously falls in one gap under any normal reading, yet
+// the topologically correct corner is the OTHER one. Also confirmed
+// (a genuine triangle fixture, zero self-loops) that angle-gap
+// arithmetic IS correct for ordinary structures, so this is a
+// self-loop-specific blind spot, not a general PR 9 bug.
+//
+// Fix: resolveMoveCorners now geometrically verifies its answer by
+// reconstructing each candidate corner's real face polygon and
+// testing the drawn curve's own next point against it. When BOTH
+// candidates "contain" the point (the exact self-loop degeneracy —
+// its two sides trace the same curve in opposite directions, so
+// pointInPolygon can't tell them apart), winding-number sign,
+// compared against the reference loop's OWN winding (not a fixed
+// convention — see windingNumber's test file for why a fixed
+// "always positive" rule was tried and found wrong), breaks the tie.
+
+for (const [ownerLabel, owner, outside] of [['dot 0', 0, 2], ['dot 2', 2, 0]]) {
+  for (const [windingLabel, drawnLoop] of [['CW', squareLoopCW], ['CCW', squareLoopCCW]]) {
+    test(`PR 10c: a real follow-up join from the enclosed dot to the loop owner succeeds (owner=${ownerLabel}, ${windingLabel})`, () => {
+      const state = threeDotsFresh();
+      const enclosed = [0, 1, 2].find(id => id !== owner && id !== outside);
+      const positions = { [owner]: { x: 0, y: 0 }, [enclosed]: { x: 50, y: 50 }, [outside]: { x: 900, y: 900 } };
+      const getDotPosition = id => positions[id] ?? null;
+      const storedPaths = {};
+      const getEdgePath = mi => storedPaths[mi] ?? null;
+
+      const { startCorner, endCorner } = resolveMoveCorners(state, owner, owner, drawnLoop, getEdgePath);
+      const { placement, exteriorSide } = resolveMovePlacement(
+        state, owner, owner, startCorner, endCorner, drawnLoop, getDotPosition, getEdgePath
+      );
+      const afterLoop = applyMove(state, {
+        startDotId: owner, endDotId: owner, startCorner, endCorner, placement, exteriorSide,
+      });
+      storedPaths[0] = drawnLoop;
+
+      // The real follow-up: a straight line from the enclosed dot
+      // back to the owner, entirely inside the loop.
+      const mid = { x: (positions[enclosed].x + positions[owner].x) / 2, y: (positions[enclosed].y + positions[owner].y) / 2 };
+      const joinPath = [positions[enclosed], mid, positions[owner]];
+      const jc = resolveMoveCorners(afterLoop, enclosed, owner, joinPath, getEdgePath);
+
+      const validation = validateMove(afterLoop, {
+        startDotId: enclosed, endDotId: owner, startCorner: jc.startCorner, endCorner: jc.endCorner,
+        placement: null, exteriorSide: null,
+      });
+      assert.equal(validation.ok, true, `join should be legal: ${JSON.stringify(validation.violations)}`);
+    });
+  }
+}
+
+test('PR 10c: a follow-up join still resolves correctly when the loop owner already has a pre-existing edge', () => {
+  // dot 1 gets one edge (to dot 0) first via a plain merge, THEN
+  // self-loops enclosing dot 2 (dot 3 stays outside). The follow-up
+  // join goes to the self-loop's OWN sprout (dot 1 itself is fully
+  // exhausted — degree 3 — after merge + self-loop, so connecting
+  // further from dot 1 directly isn't legal Sprouts anyway).
+  const state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }, { id: 2, lives: 3 }, { id: 3, lives: 3 }],
+    edges: [], moves: [], initialDotCount: 4, startingPlayer: 0,
+    nextDotId: 4, ...buildInitialTopology(4),
+  };
+  const positions = {
+    0: { x: 500, y: 500 }, 1: { x: 0, y: 0 }, 2: { x: 20, y: 20 }, 3: { x: 900, y: 900 },
+  };
+  const getDotPosition = id => positions[id] ?? null;
+  const storedPaths = {};
+  const getEdgePath = mi => storedPaths[mi] ?? null;
+
+  const straight = [positions[1], { x: 250, y: 250 }, positions[0]];
+  const c0 = resolveMoveCorners(state, 1, 0, straight, getEdgePath);
+  const afterMerge = applyMove(state, {
+    startDotId: 1, endDotId: 0, startCorner: c0.startCorner, endCorner: c0.endCorner,
+    placement: null, exteriorSide: null,
+  });
+  storedPaths[0] = straight;
+
+  const loop2 = [
+    { x: 0, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 40 }, { x: 0, y: 40 }, { x: 0, y: 0 },
+  ];
+  const c1 = resolveMoveCorners(afterMerge, 1, 1, loop2, getEdgePath);
+  const { placement, exteriorSide } = resolveMovePlacement(
+    afterMerge, 1, 1, c1.startCorner, c1.endCorner, loop2, getDotPosition, getEdgePath
+  );
+  const afterLoop = applyMove(afterMerge, {
+    startDotId: 1, endDotId: 1, startCorner: c1.startCorner, endCorner: c1.endCorner, placement, exteriorSide,
+  });
+  storedPaths[1] = loop2;
+
+  // The self-loop's own sprout is dot 5 (dots 0-3 seeded, dot 4 from
+  // the merge's sprout, dot 5 from the self-loop's sprout).
+  const sproutId = 5;
+  assert.equal(afterLoop.dots.length, 6, 'sanity: sprout ids as expected');
+
+  const joinPath = [positions[2], { x: 10, y: 10 }, { x: 20, y: 0 }];
+  const jc = resolveMoveCorners(afterLoop, 2, sproutId, joinPath, getEdgePath);
+  const validation = validateMove(afterLoop, {
+    startDotId: 2, endDotId: sproutId, startCorner: jc.startCorner, endCorner: jc.endCorner,
+    placement: null, exteriorSide: null,
+  });
+  assert.equal(validation.ok, true, `join should be legal: ${JSON.stringify(validation.violations)}`);
+});

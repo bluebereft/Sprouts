@@ -22,6 +22,44 @@
    ================================================================ */
 
 /**
+ * Signed winding number of a point relative to a closed polygon
+ * (implicitly closed — last point connects back to first, same as
+ * pointInPolygon). Unlike pointInPolygon's even-odd test, the SIGN
+ * distinguishes which way the boundary was traced: positive for a
+ * counterclockwise-traced boundary (standard math y-up convention;
+ * in this project's y-down screen coordinates that corresponds to
+ * a visually clockwise curve), negative for the reverse, zero for
+ * genuinely outside — regardless of self-intersection.
+ *
+ * Needed specifically where pointInPolygon cannot discriminate: two
+ * reconstructed face polygons that trace the SAME physical curve in
+ * opposite directions (a self-loop with no other boundary structure
+ * to differentiate its two sides — see js/cornerGeometry.js's
+ * resolveEndpointCorner, PR 10c) give pointInPolygon the identical
+ * answer for either one, but opposite-signed winding numbers.
+ *
+ * @param {{x:number,y:number}} point
+ * @param {Array<{x:number,y:number}>} polygon — at least 2 points
+ * @returns {number} the winding number (typically -1, 0, or 1 for a
+ *   simple closed curve; sign is what matters for this project's use)
+ */
+export function windingNumber(point, polygon) {
+  if (!polygon || polygon.length < 2) return 0;
+  let total = 0;
+  for (let i = 0; i < polygon.length; i++) {
+    const p1 = polygon[i];
+    const p2 = polygon[(i + 1) % polygon.length];
+    const a1 = Math.atan2(p1.y - point.y, p1.x - point.x);
+    const a2 = Math.atan2(p2.y - point.y, p2.x - point.x);
+    let delta = a2 - a1;
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    while (delta < -Math.PI) delta += 2 * Math.PI;
+    total += delta;
+  }
+  return total / (2 * Math.PI);
+}
+
+/**
  * Standard even-odd (ray-casting) point-in-polygon test. The polygon
  * is the ordered vertex list `polygon` (an array of {x, y}); the
  * curve is treated as implicitly closed (last point connects back to
