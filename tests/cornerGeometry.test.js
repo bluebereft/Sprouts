@@ -14,6 +14,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existingAngles, resolveMoveCorners, resolveMovePlacement } from '../js/cornerGeometry.js';
 import { buildInitialTopology } from '../js/engine/regions.js';
+import { createMove } from '../js/engine/move.js';
+import { arcLengthSplit } from '../js/pathGeometry.js';
 
 const EPS = 1e-6;
 function assertAngleClose(actual, expected, msg) {
@@ -93,9 +95,15 @@ test('resolveMoveCorners: new curve heading north from the sprout resolves to ga
   // PR 10c: resolveMoveCorners now geometrically verifies via
   // traceFaces, which requires a genuine Array (not an object with
   // numeric keys) for rotations — build isolatedDot3 as a real array.
+  // PR 10c follow-up fix: also needs dots/outerFaceAnchor/parentAnchor
+  // (getComponents + resolveOuterFaceAnchor), for the exterior-face
+  // fallback when no candidate polygon contains the test point.
   const isolatedDot3 = {
+    dots: [{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }],
     rotations: [twoDotState.rotations[0], twoDotState.rotations[1], twoDotState.rotations[2], []],
     edges: twoDotState.edges,
+    outerFaceAnchor: { 0: { kind: 'dart', value: 0 }, 3: { kind: 'vertex', value: 3 } },
+    parentAnchor: { 0: null, 3: null },
   };
   const { startCorner, endCorner } = resolveMoveCorners(isolatedDot3, 2, 3, newPath, getPath0);
   assert.equal(startCorner, 0, 'north-heading departure lands in gap 0 (the upper half)');
@@ -105,8 +113,11 @@ test('resolveMoveCorners: new curve heading north from the sprout resolves to ga
 test('resolveMoveCorners: new curve heading south from the sprout resolves to gap 1', () => {
   const newPath = [{ x: 5, y: 0 }, { x: 5, y: 10 }]; // south: y increases
   const isolatedDot3 = {
+    dots: [{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }],
     rotations: [twoDotState.rotations[0], twoDotState.rotations[1], twoDotState.rotations[2], []],
     edges: twoDotState.edges,
+    outerFaceAnchor: { 0: { kind: 'dart', value: 0 }, 3: { kind: 'vertex', value: 3 } },
+    parentAnchor: { 0: null, 3: null },
   };
   const { startCorner } = resolveMoveCorners(isolatedDot3, 2, 3, newPath, getPath0);
   assert.equal(startCorner, 1, 'south-heading departure lands in gap 1 (the lower half)');
@@ -420,5 +431,86 @@ test('PR 10c: a follow-up join still resolves correctly when the loop owner alre
     startDotId: 2, endDotId: sproutId, startCorner: jc.startCorner, endCorner: jc.endCorner,
     placement: null, exteriorSide: null,
   });
+  assert.equal(validation.ok, true, `join should be legal: ${JSON.stringify(validation.violations)}`);
+});
+
+// ── PR 10c follow-up: exterior face degenerates when its OWN
+// reconstruction retraces the whole original self-loop, and no
+// candidate then "contains" a point genuinely outside everything ──
+//
+// Found via a real playtested game (Jared, browser). Exact game
+// record reproduced below. The loop's owner (dot 0) enclosed dot 1,
+// then three more moves built out real structure INSIDE the loop
+// (enclosed dot 1 connecting back to the owner, twice more). At that
+// point, the loop's INTERIOR face has genuine extra structure (well-
+// formed polygon, correctly excludes points outside), but its
+// EXTERIOR face is still just the original 2 darts from the self-loop
+// — reconstructing it retraces the ENTIRE closed loop. Testing a
+// point genuinely outside everything against that degenerate
+// reconstruction correctly says "not inside the loop" — which is
+// backwards for a face meant to represent "everything outside": both
+// pointInPolygon AND winding number are uninformative for a point
+// outside a simple closed curve (winding is ~0 either way), so
+// neither existing mechanism could resolve it. Fixed by falling back
+// to the engine's own authoritative record of which face is the
+// component's true exterior (resolveOuterFaceAnchor) when no
+// candidate's polygon contains the point.
+
+test('PR 10c follow-up: a follow-up move to the far outside still resolves correctly once the loop\'s interior has real structure', () => {
+  const bigLoop = [
+    { x: 76, y: 238 }, { x: 100, y: 130 }, { x: 220, y: 90 }, { x: 340, y: 100 },
+    { x: 417, y: 180 }, { x: 417, y: 260 }, { x: 340, y: 340 }, { x: 220, y: 350 },
+    { x: 100, y: 300 }, { x: 76, y: 238 },
+  ];
+  const positions = { 0: { x: 76, y: 238 }, 1: { x: 200, y: 220 }, 2: { x: 601, y: 238 } };
+  const getDotPosition = id => positions[id] ?? null;
+  const storedPaths = {};
+  const getEdgePath = mi => storedPaths[mi] ?? null;
+
+  let state = {
+    dots: [{ id: 0, lives: 3 }, { id: 1, lives: 3 }, { id: 2, lives: 3 }],
+    edges: [], moves: [], initialDotCount: 3, startingPlayer: 0,
+    nextDotId: 3, ...buildInitialTopology(3),
+  };
+
+  // Move 0: the big self-loop enclosing dot 1, dot 2 outside.
+  const m0 = resolveMoveCorners(state, 0, 0, bigLoop, getEdgePath);
+  const p0 = resolveMovePlacement(state, 0, 0, m0.startCorner, m0.endCorner, bigLoop, getDotPosition, getEdgePath);
+  state = applyMove(state, { startDotId: 0, endDotId: 0, ...m0, placement: p0.placement, exteriorSide: p0.exteriorSide });
+  storedPaths[0] = bigLoop;
+  positions[3] = arcLengthSplit(bigLoop).point; // dot 3 = the loop's own sprout
+
+  // Move 1: connect enclosed dot 1 back to the owner, dot 0.
+  const path1 = [positions[1], { x: 138, y: 219 }, positions[0]];
+  const m1 = resolveMoveCorners(state, 1, 0, path1, getEdgePath);
+  state = applyMove(state, { startDotId: 1, endDotId: 0, ...m1, placement: null, exteriorSide: null });
+  storedPaths[1] = path1;
+  positions[4] = arcLengthSplit(path1).point;
+
+  // Move 2 and 3: two more moves building out the interior structure.
+  const path2 = [positions[4], { x: 219, y: 227 }, positions[1]];
+  const m2 = resolveMoveCorners(state, 4, 1, path2, getEdgePath);
+  state = applyMove(state, { startDotId: 4, endDotId: 1, ...m2, placement: null, exteriorSide: null });
+  storedPaths[2] = path2;
+  positions[5] = arcLengthSplit(path2).point;
+
+  const path3 = [positions[5], { x: 249, y: 224 }, positions[1]];
+  const m3 = resolveMoveCorners(state, 5, 1, path3, getEdgePath);
+  state = applyMove(state, { startDotId: 5, endDotId: 1, ...m3, placement: null, exteriorSide: null });
+  storedPaths[3] = path3;
+
+  // Ground truth, established directly against the engine: dot 3's
+  // corner 1 is legal for connecting to dot 2 (the untouched, still-
+  // root, genuinely-outside dot); corner 0 is not.
+  assert.equal(validateMove(state, createMove(3, 2, 1, 0)).ok, true);
+  assert.equal(validateMove(state, createMove(3, 2, 0, 0)).ok, false);
+
+  // The actual regression: a real drawn curve from dot 3 heading
+  // further outward (away from the loop, toward dot 2) must resolve
+  // to corner 1, not corner 0.
+  const joinPath = [positions[3], { x: 509, y: 219 }, positions[2]];
+  const jc = resolveMoveCorners(state, 3, 2, joinPath, getEdgePath);
+  assert.equal(jc.startCorner, 1, 'must resolve to the corner facing the true exterior');
+  const validation = validateMove(state, createMove(3, 2, jc.startCorner, jc.endCorner));
   assert.equal(validation.ok, true, `join should be legal: ${JSON.stringify(validation.violations)}`);
 });

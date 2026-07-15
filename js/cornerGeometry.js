@@ -189,12 +189,9 @@ function resolveEndpointCorner(state, dotId, path, end, getEdgePath) {
     if (!face) continue;
     const poly = facePolygon(face, state.edges, getEdgePath);
     if (poly.length < 3) continue;
-    candidates.push({
-      corner: c,
-      contains: pointInPolygon(testPoint, poly),
-      winding: windingNumber(testPoint, poly),
-      face,
-    });
+    const contains = pointInPolygon(testPoint, poly);
+    const winding = windingNumber(testPoint, poly);
+    candidates.push({ corner: c, contains, winding, face });
   }
   if (candidates.length === 0) return naive;
 
@@ -223,6 +220,42 @@ function resolveEndpointCorner(state, dotId, path, end, getEdgePath) {
       if (matching) return matching.corner;
     }
     return containing[0].corner; // inconclusive — deterministic fallback
+  }
+
+  // containing.length === 0: no candidate's reconstructed polygon
+  // contains the point. For an ordinary bounded/interior candidate
+  // this correctly means "not this one" — but a face that has NEVER
+  // been further subdivided since the self-loop that created it (2
+  // darts, one originating move) reconstructs as the ENTIRE closed
+  // loop retraced, and testing containment against that answers "is
+  // this point inside the loop", not "is this point on the exterior
+  // side" — backwards for a face that's actually meant to represent
+  // everything OUTSIDE. Confirmed directly: a real follow-up-move
+  // scenario where the interior had been further built out (so its
+  // own polygon was well-formed and correctly excluded the point) but
+  // the untouched exterior face's degenerate reconstruction ALSO
+  // (correctly, for a bounded-region reading, but uselessly here)
+  // excluded the same point — winding number is equally uninformative
+  // for a point outside a simple closed curve (its winding number is
+  // 0 either way, confirmed: both candidates printed a value
+  // indistinguishable from zero).
+  //
+  // Resolution: use the engine's OWN authoritative record of which
+  // face is this component's true exterior — resolveOuterFaceAnchor,
+  // already tracked precisely because of PR 10's exteriorSide work —
+  // as a trump card. If no candidate's (reliable) polygon contains
+  // the point, and exactly one candidate IS that component's outer
+  // face, it must be the answer by elimination: the point isn't in
+  // any bounded sub-region, and this face is defined as "everything
+  // else" relative to this component.
+  const dotIds = state.dots.map(d => d.id);
+  const components = getComponents(state.edges, dotIds);
+  const touched = components.find(members => members.includes(dotId));
+  const rep = touched ? touched[0] : dotId;
+  const trueOuterFace = resolveOuterFaceAnchor(faces, state.outerFaceAnchor[rep]);
+  const exteriorCandidates = candidates.filter(c => c.face === trueOuterFace);
+  if (exteriorCandidates.length === 1) {
+    return exteriorCandidates[0].corner;
   }
 
   return naive; // inconclusive (e.g. missing stored-path data) — safe fallback

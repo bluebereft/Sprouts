@@ -1227,6 +1227,57 @@ the same session. Cost is one extra `traceFaces`/polygon reconstruction
 per corner resolution when degree ≥ 2 — trivial for a turn-based game
 at Sprouts' scale, not benchmarked, not expected to matter.
 
+**PR 10c follow-up — the exterior face's OWN degeneracy (found via
+real playtesting, fixed).** Jared played a real game in the browser
+(exact Game Record reproduced and replayed to ground the fix, not
+worked from the screenshot alone) and found the exact residual above
+was reachable, not just theoretical: after a self-loop enclosed a dot,
+three further moves built real structure inside the loop, then a
+follow-up move from the loop's own sprout out to a genuinely separate,
+untouched dot was wrongly rejected as `DIFFERENT_REGIONS`.
+
+Traced precisely: the sprout's *interior*-facing corner's reconstructed
+polygon was well-formed (grown by the three interior moves) and
+correctly excluded the test point. But the sprout's *exterior*-facing
+corner had never been touched since the original self-loop — still
+just 2 darts, both from that one move — so reconstructing its polygon
+retraces the ENTIRE original closed loop. Testing "is this point
+inside the loop" against that reconstruction correctly says no (the
+point genuinely is outside), but "no" is backwards for a face meant to
+represent "everything outside": both `pointInPolygon` and
+`windingNumber` are fundamentally uninformative for a point outside a
+simple closed curve (confirmed directly: winding came back
+indistinguishable from zero for both candidates). Neither of the two
+existing PR 10c mechanisms could resolve this case, because both
+assume the ambiguity is about a point that IS inside something.
+
+**Fix:** when no candidate's polygon contains the test point,
+`resolveEndpointCorner` now falls back to the engine's own
+authoritative record of which face is the touched component's true
+exterior — `resolveOuterFaceAnchor`, already tracked precisely because
+of PR 10's `exteriorSide` work. If exactly one candidate matches it,
+that candidate is the answer by elimination: the point isn't in any
+bounded sub-region, and this face is defined as "everything else"
+relative to the component. No engine changes; `getComponents` and
+`resolveOuterFaceAnchor` were already available, just not previously
+consulted inside corner resolution.
+
+Two pre-existing test fixtures (`isolatedDot3`, reused across two
+tests) needed extending again — this time with a full `dots` array
+and `outerFaceAnchor`/`parentAnchor` entries, which the new fallback
+path requires via `getComponents`. Same recurring pattern as PR 10a/
+10c's earlier fixture fixes: a hand-built fixture that was "just
+enough" for the old code stops being enough once new, legitimate code
+paths need more of the state shape — not a sign of anything wrong with
+the fix itself.
+
+**Tests:** a new regression test built directly from Jared's actual
+exported Game Record, replayed through real `resolveMoveCorners`/
+`resolveMovePlacement` calls with plausible drawn-curve geometry
+(matching the screenshot's layout), asserting the exact follow-up
+move now resolves to the correct corner and validates as legal.
+234/234 tests passing (233 prior + 1 new).
+
 **PR 11 — Legal move enumeration + `hasLegalMove` + game-over
 detection.** ✅ **COMPLETE.** Objective: answer "what legal moves
 exist right now?" and "is the game over?" — questions about the
