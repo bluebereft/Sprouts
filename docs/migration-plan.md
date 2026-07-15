@@ -1227,6 +1227,98 @@ the same session. Cost is one extra `traceFaces`/polygon reconstruction
 per corner resolution when degree ≥ 2 — trivial for a turn-based game
 at Sprouts' scale, not benchmarked, not expected to matter.
 
+**PR 11 — Legal move enumeration + `hasLegalMove` + game-over
+detection.** ✅ **COMPLETE.** Objective: answer "what legal moves
+exist right now?" and "is the game over?" — questions about the
+SPACE of moves, versus `validateMove`'s "is this ONE given move
+legal?". New module `js/engine/legalMoves.js`, built entirely on top
+of `validateMove` (never reimplementing its logic independently), so
+enumeration can never silently drift out of sync with the actual
+rules.
+
+**Design insight, verified directly against the code rather than
+assumed:** `validateMove` never checks `exteriorSide`, and per spec
+Prop 7.4 (placement freeness), any placement whose domain exactly
+equals K passes — there is no such thing as an illegal placement
+shape once the domain is right. So `hasLegalMove` can cheaply
+pre-filter candidate corner pairs on region-sharing + lives alone,
+constructing a full K-based candidate only for the few pairs that
+pass, and short-circuit on the first legal one found — it never needs
+to search all 2^|K| placements just to answer a yes/no question.
+`enumerateLegalMoves` does NOT take this shortcut, since future
+callers (bots, puzzle generation) need the complete, real move set,
+including every distinct placement for a split with occupants.
+
+**A real bug found by the test oracle, not by inspection:** the first
+version left `exteriorSide` null on every constructed move, reasoned
+as being out of scope (determining which side is physically unbounded
+needs real drawn geometry the engine doesn't have). This is TRUE for
+existence-checking (`validateMove` doesn't care), but FALSE once a
+move is actually *applied* — which the random-game simulation test
+does, repeatedly, to play out full games. Traced precisely: when a
+split touches the touched component's own current outer/⊥ face and
+K ≠ ∅, leaving `exteriorSide` null makes the reducer's own default
+(side 1) collide with wherever the canonical all-side-1 placement had
+just nested an occupant — leaving the component's own outer-face
+anchor pointing at the exact same face one of its own occupants was
+just nested into, a direct contradiction (confirmed by hand: printed
+both resolved faces, byte-identical). Corrupts containment
+(`PARENT_UNSOUND`/`FOREST_CYCLE`), caught immediately by the
+simulation test, not shipped silently.
+
+**Fix:** whenever a split's host face equals the touched component's
+own resolved outer face, `buildCandidate` now supplies `exteriorSide =
+2` — always safe, since the canonical placement puts every K member
+on side 1, leaving side 2 genuinely empty (Prop 7.4: "enclose everyone
+in K, leave the other side empty" is always a realisable drawing).
+`enumerateLegalMoves` reuses this SAME exteriorSide value across every
+one of the 2^|K| placements it generates for a given corner pair,
+rather than varying it — verified sufficient (not assumed): holding
+exteriorSide fixed while placement ranges over every assignment
+already reaches every distinct nested-vs-root outcome for K, since
+flipping exteriorSide while ALSO flipping which side each occupant is
+assigned just relabels the identical outcome under a different
+placement dict (e.g. `{occ:1}` with ext=2 and `{occ:2}` with ext=1
+both mean "occupant nested") — confirmed by direct hand-trace of both
+combinations before relying on it.
+
+**Test oracle used, verified against multiple independent sources
+before relying on it, not assumed from memory:** a Sprouts game
+starting with n spots always lasts between 2n and 3n−1 moves
+inclusive — confirmed against Wikipedia, the Encyclopedia of
+Mathematics, and two independent maths-writeup sources (all giving
+the identical bound and the identical proof sketch: 3n total lives,
+each move consumes exactly one net life, game ends when no two lives
+share a legal connection). `tests/engine/legalMoves.test.js` plays 15
+random full games for each of n=1..5 (mulberry32 seeded RNG, so
+failures are reproducible), asserting every game's move count falls
+in [2n, 3n−1], both players get a legal winner, and `checkInvariantsV2`
+passes on the final state. This is the test that caught the
+`exteriorSide` bug — a purely move-by-move unit-test suite would very
+plausibly have missed it, since any single generated move is
+individually legal; only actually playing a full sequence exposed the
+containment corruption.
+
+**Scope fence (explicit, matching the plan discussed with Jared
+beforehand):** no move quality/strategy (bot territory, later); no
+crossing-detection dependency — checked directly, not assumed: a pair
+of dots the engine reports as sharing a region is, by the region
+model's own definition, always reachable by some non-crossing curve,
+so `hasLegalMove` cannot report a move that would actually require
+crossing something; crossing-detection (PR 12) exists to catch a
+player's messy real mouse-drawn line, a browser/input concern, not a
+gap in this PR's own correctness. No browser UI change (no "Game
+Over" banner) — deliberately deferred as a quick, separate follow-on
+rather than bundled in.
+
+**Tests:** `tests/engine/legalMoves.test.js` — hand-derived existence
+and enumeration-count cases (including a fresh 2-dot game's exact
+5-move enumeration, hand-counted: 1 merge + 2 self-loops × 2 sibling
+placements each); `hasLegalMove`/`enumerateLegalMoves` agreement;
+`checkGameOver`'s winner convention (normal play: the stuck player
+loses); the 5-value (n=1..5) × 15-trial random-game simulation above.
+233/233 tests passing (222 prior + 11 new).
+
 ## Historic open items carried
 
 1. ~~**O-Q1 ruling**~~ — resolved (Jared): v1 Game Records dropped

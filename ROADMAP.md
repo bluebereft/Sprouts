@@ -575,8 +575,26 @@ feature gaps, sequenced as follows (agreed July 2026):
   self-loop's two sides are geometrically indistinguishable by plain
   containment. 222/222 tests.
 - **PR 11 — Legal move enumeration + `hasLegalMove` + game-over
-  detection.** Foundation for puzzle Tier 1's generator/classifier and
-  every future bot.
+  detection.** ✅ **COMPLETE** — new `js/engine/legalMoves.js`, built
+  entirely on `validateMove` so it can never drift out of sync with
+  the actual rules. `hasLegalMove` cheaply short-circuits on the
+  first legal move found (Prop 7.4 means placement shape is never a
+  reason to reject, so it never needs to search placements just to
+  answer yes/no); `enumerateLegalMoves` returns every distinct move
+  including every distinct occupant placement, for future bots/puzzle
+  generation. Found and fixed a real containment-corrupting bug via a
+  random-full-game simulation test (not caught by ordinary unit
+  tests, since any single generated move looked individually legal):
+  leaving `exteriorSide` null on enclosure-style moves let the
+  reducer's own default collide with where the canonical placement
+  had just nested an occupant. Verified against the classical Sprouts
+  theorem (a game with n starting dots always lasts 2n to 3n−1 moves)
+  across multiple independent sources before using it as a test
+  oracle. No crossing-detection dependency (checked, not assumed —
+  the region model already guarantees same-region pairs are reachable
+  without crossing anything). 233/233 tests. No "Game Over" banner in
+  the browser yet — deliberately deferred as a small separate
+  follow-on.
 - **PR 12 — Crossing detection integrated into engine rules,** reusing
   the geometry primitives that already exist from v0.7
   (`crossingDetection.js`) — their fit against the new corner/
