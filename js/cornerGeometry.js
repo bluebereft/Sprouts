@@ -170,47 +170,62 @@ function resolveEndpointCorner(state, dotId, path, end, getEdgePath) {
 
   const faces = traceFaces(state.edges, state.rotations);
 
+  // The component's own known exterior face (authoritative — tracked
+  // precisely via outerFaceAnchor since PR 10, and now also
+  // maintained correctly for K = ∅ splits — see resolveMovePlacement).
+  // Known ahead of any polygon test because its own reconstruction is
+  // frequently NOT a clean simple polygon and cannot be trusted at
+  // face value (see below) — but if the point isn't found in any of
+  // the OTHER, genuinely bounded candidates, this one must be right,
+  // by elimination, regardless of what its own polygon says.
+  const dotIds = state.dots.map(d => d.id);
+  const components = getComponents(state.edges, dotIds);
+  const touched = components.find(members => members.includes(dotId));
+  const rep = touched ? touched[0] : dotId;
+  const trueOuterFace = resolveOuterFaceAnchor(faces, state.outerFaceAnchor[rep]);
+
   // Test EVERY candidate corner's reconstructed face polygon against
   // the drawn curve's real next point, collecting both a containment
-  // answer and a winding number for each. Containment alone decides
-  // it when the candidates disagree (the ordinary case — confirmed
-  // against a genuine multi-edge structure with no self-loop
-  // involved). When containment does NOT discriminate (every
-  // candidate agrees) — confirmed to happen exactly when a pure
-  // self-loop's two reconstructed "sides" trace the same physical
-  // curve in opposite directions, so pointInPolygon's even-odd test
-  // gives them the identical answer — the SIGN of the winding number
-  // does discriminate (opposite for the two directions), pinned
-  // against a real enclosure fixture, not re-derived by hand
-  // (avoiding the mistake that shipped PR 10's original bug).
+  // answer and a winding number for each.
+  //
+  // Why the known-exterior face is excluded from this containment
+  // test (confirmed by direct inspection, not assumed): a face's
+  // boundary walk correctly retraces any BRIDGE edge on it twice —
+  // real, standard planar-graph topology (a tree-connected structure
+  // has no "other side"). That's fine as a walk, but converting it
+  // into an actual point-in-polygon-testable polygon produces a
+  // self-retracing curve, and both pointInPolygon and windingNumber
+  // gave unreliable answers against it in a confirmed real case (the
+  // exterior's own polygon showed "contains" for a point that was
+  // legitimately exterior, purely because of the retraced segment,
+  // not because it was genuinely enclosed). The OTHER, genuinely
+  // bounded candidates don't have this problem (their own walks don't
+  // retrace bridges the same way), so they're trustworthy directly.
   const candidates = [];
   for (let c = 0; c < degree; c++) {
     const face = cornerFace(state.edges, state.rotations, faces, dotId, c);
-    if (!face) continue;
+    if (!face || face === trueOuterFace) continue;
     const poly = facePolygon(face, state.edges, getEdgePath);
     if (poly.length < 3) continue;
-    const contains = pointInPolygon(testPoint, poly);
-    const winding = windingNumber(testPoint, poly);
-    candidates.push({ corner: c, contains, winding, face });
+    candidates.push({ corner: c, contains: pointInPolygon(testPoint, poly), winding: windingNumber(testPoint, poly), face });
   }
-  if (candidates.length === 0) return naive;
 
   const containing = candidates.filter(c => c.contains);
   if (containing.length === 1) {
     return containing[0].corner; // unambiguous — the ordinary case
   }
   if (containing.length > 1) {
-    // Degenerate: multiple (reconstructed-identically) candidates all
-    // "contain" the point — pointInPolygon's even-odd test cannot
-    // discriminate a curve traced in opposite directions. Winding
-    // number CAN, but only relative to the ACTUAL drawn geometry, not
-    // a fixed sign (confirmed by testing both a clockwise- and a
-    // counterclockwise-drawn loop: a fixed "always positive" rule
-    // matched one and was wrong for the other). Find the raw path
-    // that created the ambiguous darts (in this degenerate case, all
-    // of them share one originating move) and use ITS OWN winding
-    // number at the test point as the reference sign; the correct
-    // candidate is whichever one matches it.
+    // Degenerate: multiple bounded candidates all "contain" the point
+    // — pointInPolygon's even-odd test cannot discriminate a curve
+    // traced in opposite directions. Winding number CAN, but only
+    // relative to the ACTUAL drawn geometry, not a fixed sign
+    // (confirmed by testing both a clockwise- and a counterclockwise-
+    // drawn loop: a fixed "always positive" rule matched one and was
+    // wrong for the other). Find the raw path that created the
+    // ambiguous darts (in this degenerate case, all of them share one
+    // originating move) and use ITS OWN winding number at the test
+    // point as the reference sign; the correct candidate is whichever
+    // one matches it.
     const anyDart = containing[0].face.darts[0];
     const refMoveIndex = state.edges[edgeOfDart(anyDart)].originatingMoveIndex;
     const refPath = getEdgePath(refMoveIndex);
@@ -222,43 +237,26 @@ function resolveEndpointCorner(state, dotId, path, end, getEdgePath) {
     return containing[0].corner; // inconclusive — deterministic fallback
   }
 
-  // containing.length === 0: no candidate's reconstructed polygon
-  // contains the point. For an ordinary bounded/interior candidate
-  // this correctly means "not this one" — but a face that has NEVER
-  // been further subdivided since the self-loop that created it (2
-  // darts, one originating move) reconstructs as the ENTIRE closed
-  // loop retraced, and testing containment against that answers "is
-  // this point inside the loop", not "is this point on the exterior
-  // side" — backwards for a face that's actually meant to represent
-  // everything OUTSIDE. Confirmed directly: a real follow-up-move
-  // scenario where the interior had been further built out (so its
-  // own polygon was well-formed and correctly excluded the point) but
-  // the untouched exterior face's degenerate reconstruction ALSO
-  // (correctly, for a bounded-region reading, but uselessly here)
-  // excluded the same point — winding number is equally uninformative
-  // for a point outside a simple closed curve (its winding number is
-  // 0 either way, confirmed: both candidates printed a value
-  // indistinguishable from zero).
-  //
-  // Resolution: use the engine's OWN authoritative record of which
-  // face is this component's true exterior — resolveOuterFaceAnchor,
-  // already tracked precisely because of PR 10's exteriorSide work —
-  // as a trump card. If no candidate's (reliable) polygon contains
-  // the point, and exactly one candidate IS that component's outer
-  // face, it must be the answer by elimination: the point isn't in
-  // any bounded sub-region, and this face is defined as "everything
-  // else" relative to this component.
-  const dotIds = state.dots.map(d => d.id);
-  const components = getComponents(state.edges, dotIds);
-  const touched = components.find(members => members.includes(dotId));
-  const rep = touched ? touched[0] : dotId;
-  const trueOuterFace = resolveOuterFaceAnchor(faces, state.outerFaceAnchor[rep]);
-  const exteriorCandidates = candidates.filter(c => c.face === trueOuterFace);
-  if (exteriorCandidates.length === 1) {
-    return exteriorCandidates[0].corner;
+  // No bounded candidate contains the point — by elimination, it must
+  // be on the component's known exterior side. There may be more than
+  // one gap bordering the exterior face (e.g. a bridge point touches
+  // it from both "directions") — when the naive angle-based answer is
+  // ITSELF one of them, prefer it (preserves the original, cosmetic
+  // gap choice for a genuinely degenerate tie, rather than always
+  // collapsing to whichever comes first — confirmed via regression:
+  // a bridge sprout's north- vs south-departing curves are
+  // topologically equivalent but should still resolve to their own
+  // distinct, angle-correct gap, not always the same one).
+  const exteriorMatches = [];
+  for (let c = 0; c < degree; c++) {
+    const face = cornerFace(state.edges, state.rotations, faces, dotId, c);
+    if (face && face === trueOuterFace) exteriorMatches.push(c);
   }
+  if (exteriorMatches.includes(naive)) return naive;
+  if (exteriorMatches.length > 0) return exteriorMatches[0];
 
-  return naive; // inconclusive (e.g. missing stored-path data) — safe fallback
+  return naive; // inconclusive (e.g. missing stored-path data, or no
+                // known exterior face at all) — safe fallback
 }
 
 /**
@@ -305,7 +303,29 @@ export function resolveMovePlacement(
   const rep = touched[0];
 
   const K = computeK(faces, state.parentAnchor, startFace, rep, state.outerFaceAnchor);
-  if (K.length === 0) {
+
+  // Does this split touch the touched component's OWN current root/⊥
+  // outer face? Computed here (not just at the end, as before)
+  // because it now ALSO gates whether we do full geometric
+  // resolution at all — see the check below.
+  const outerAnchorFace = resolveOuterFaceAnchor(faces, state.outerFaceAnchor[rep]);
+  const isRoot = state.parentAnchor[rep] === null || state.parentAnchor[rep] === undefined;
+  const touchesOwnRootFace = isRoot && outerAnchorFace === startFace;
+
+  // Even with nothing to place (K = ∅), if this split touches the
+  // component's own root/⊥ outer face we must still resolve WHICH
+  // side is truly exterior — otherwise the reducer's outerFaceAnchor
+  // bookkeeping for this component silently degrades to an arbitrary
+  // dart-order default (smallest dart wins, see updateContainmentForSplit),
+  // which has no relation to real geometry and corrupts FUTURE moves
+  // that rely on it as ground truth. Confirmed via a randomized
+  // geometry stress test (not assumed): a K = ∅ self-loop with a
+  // correct-by-construction follow-up move afterward still resolved
+  // to the wrong corner, purely because this move's own bookkeeping
+  // had degraded to that arbitrary default. So: do full geometric
+  // resolution whenever EITHER K is non-empty OR this split touches
+  // the component's own root face — not just when K is non-empty.
+  if (K.length === 0 && !touchesOwnRootFace) {
     return { placement: {}, exteriorSide: null };
   }
 
@@ -380,19 +400,49 @@ export function resolveMovePlacement(
     for (const occRep of K) {
       if (!(occRep in placement)) placement[occRep] = 1; // missing position — defensive default
     }
-    insideSideForExterior = 2;
+
+    // insideSideForExterior: only actually needed when touchesOwnRootFace
+    // (checked below), but must be GENUINELY grounded when it is —
+    // found via stress testing (not assumed) that a fixed "always 2"
+    // here corrupts outerFaceAnchor for a different-dot split touching
+    // the component's own root face, exactly like the K = ∅ self-loop
+    // bug above, just unverified/unaddressed until now.
+    //
+    // Grounded via pure COMBINATORIAL fact, not geometry: any OTHER
+    // vertex already in this component, uninvolved in this move, was
+    // already correctly on the true exterior side before this split
+    // (nothing about drawing a new arc elsewhere changes that) — so
+    // whichever descendant's dart list includes one of ITS darts
+    // inherits that same true-exterior status. Deliberately not a
+    // geometric point-in-polygon test: an uninvolved reference dot is
+    // typically itself a pendant (a "spike" on the boundary, not
+    // enclosed by it), and both its own exact position AND nearby
+    // offset points gave unreliable answers directly against these
+    // (correctly bridge-retracing, hence self-overlapping) polygons —
+    // confirmed by direct inspection, not assumed. The dart-membership
+    // check sidesteps floating-point geometry entirely. No reference
+    // exists only when the component is solely this move's own two
+    // endpoints — falls back to a fixed default in that narrow case.
+    if (touchesOwnRootFace) {
+      const referenceDot = touched.find(id => id !== startDotId && id !== endDotId);
+      const referenceDart = referenceDot != null ? (state.rotations[referenceDot] ?? [])[0] : undefined;
+      if (referenceDart !== undefined) {
+        insideSideForExterior = descendants[0].darts.includes(referenceDart) ? 1 : 2;
+      } else {
+        insideSideForExterior = 2; // no reference available — documented fallback
+      }
+    } else {
+      insideSideForExterior = 2; // exteriorSide isn't used in this case anyway
+    }
   }
 
   // exteriorSide: only meaningful when this split touches the
   // touched component's OWN current outer face while it's still a
   // root (splitting the shared plane's outer region — the only case
-  // Option 1's root-normalisation applies to; see containment.js).
-  // Scoped to self-loops in practice — see migration-plan.md's PR 10b
-  // residual note for the (unverified, likely rare) different-dot
-  // case of connecting two dots both on a root's own outer face.
-  const outerAnchorFace = resolveOuterFaceAnchor(faces, state.outerFaceAnchor[rep]);
-  const isRoot = state.parentAnchor[rep] === null || state.parentAnchor[rep] === undefined;
-  const exteriorSide = (isRoot && outerAnchorFace === startFace) ? insideSideForExterior : null;
+  // Option 1's root-normalisation applies to). touchesOwnRootFace was
+  // already computed above (it's also what gated whether we did full
+  // geometric resolution at all when K was empty).
+  const exteriorSide = touchesOwnRootFace ? insideSideForExterior : null;
 
   return { placement, exteriorSide };
 }

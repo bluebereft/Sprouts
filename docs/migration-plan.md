@@ -1370,6 +1370,81 @@ placements each); `hasLegalMove`/`enumerateLegalMoves` agreement;
 loses); the 5-value (n=1..5) × 15-trial random-game simulation above.
 233/233 tests passing (222 prior + 11 new).
 
+**PR 10c second follow-up — geometric-simulation stress testing finds
+three more real bugs, all fixed; a fourth, deeper issue found and
+explicitly scoped as PR 10d (not fixed here).** Built a randomized
+game simulator that (unlike PR 11's own random-game test) draws REAL
+geometric curves through the actual `resolveMoveCorners`/
+`resolveMovePlacement` browser-layer functions, not just abstract
+corner picks — exactly the layer PR 10a/b/c's bugs all lived in, and
+exactly what PR 11's simulation never exercised. Requested and
+performed at Jared's suggestion, to check the PR 10b/10c fixes more
+thoroughly than one-off manual playtests can.
+
+Found and fixed three real, distinct bugs, all in
+`js/cornerGeometry.js`:
+
+1. **K = ∅ self-loops never computed a real `exteriorSide`** —
+   `resolveMovePlacement` only did full geometric resolution when
+   there were occupants to place. With nothing to place, the reducer's
+   own default (side 1) silently became the recorded outer-face
+   anchor regardless of real geometry — invisible until a LATER move
+   needed that bookkeeping to be correct. Fixed: do full resolution
+   whenever the split touches the component's own root/⊥ face, K
+   empty or not.
+2. **The same gap existed for K = ∅ different-dot splits** — worse,
+   the existing code for this branch was already a known, documented
+   "unverified, likely rare" shortcut (a hardcoded `exteriorSide = 2`)
+   that had just never been exercised by anything before. Fixed via a
+   deliberately NON-geometric check: find any other vertex in the same
+   component, uninvolved in this move, and see which descendant
+   face's dart list includes one of ITS darts — that descendant
+   inherits the "true exterior" status the reference vertex already
+   had. (A geometric point-in-polygon version of this was tried first
+   and failed: an uninvolved reference dot is typically itself a
+   pendant sitting exactly on its own polygon's boundary — an
+   unreliable input to containment tests, confirmed directly, not
+   assumed.)
+3. **A bridge-point tie-break regression** — when a vertex's two
+   corners are topologically equivalent (both lead to the same known
+   exterior face, e.g. a tree/bridge sprout), the fallback was
+   collapsing to whichever corner came first, discarding the original
+   angle-correct choice. Fixed to prefer the naive angle-based answer
+   when it's among the equally-valid matches — caught by an existing
+   PR 9 regression test, not the stress test itself.
+
+All three verified against their specific failing cases; one existing
+test's expectation was found to be outdated by fix #1 (not a
+regression) and corrected after independently verifying the new
+behaviour via a follow-up-move check. 234/234 tests passing.
+
+**PR 10d — systematic outer-face tracking through arbitrary move
+sequences (found, NOT fixed, design not started).** After the three
+fixes above, the same stress test still fails roughly 8 of every 10
+random games, each at a different, increasing move depth. The pattern
+suggests something more structural than three independent bugs: each
+fix so far has patched one SHAPE of "how does a component's true
+outer face get tracked correctly," but there is no single, systematic
+mechanism doing this across an arbitrary sequence of splits and
+merges — reference-dot-based fixes implicitly assume the reference's
+own outer-face relationship was already correct before the current
+move, which only holds if every prior move in the chain got this
+right too, including shapes not yet identified.
+
+Deliberately not chased further in this session: continuing to
+hand-trace individual stress-test failures risks an unbounded
+sequence of narrow patches (three so far, each a genuinely different
+shape) rather than a real fix. Scope for the eventual design pass:
+likely needs a more purely combinatorial (dart/anchor-based) mechanism
+for "which face is truly exterior" that holds as an invariant after
+EVERY move by construction, rather than being reconstructed
+case-by-case from geometry or ad-hoc reference lookups whenever a gap
+is found. The stress-test harness itself (randomized geometric
+simulation through the real corner-resolution/placement functions) is
+a real, reusable asset for verifying whatever design follows — it
+should be formalized into `tests/` rather than staying an ad-hoc
+script, as part of that PR.
+
 ## Historic open items carried
 
 1. ~~**O-Q1 ruling**~~ — resolved (Jared): v1 Game Records dropped

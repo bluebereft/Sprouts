@@ -200,7 +200,7 @@ test('resolveMovePlacement: with no drawn enclosure, both siblings resolve to th
   assert.equal(exteriorSide, 2);
 });
 
-test('resolveMovePlacement: a lone self-loop with no siblings returns empty placement', () => {
+test('resolveMovePlacement: a lone self-loop with no siblings has empty placement, but still gets a real exteriorSide', () => {
   const state = {
     dots: [{ id: 0, lives: 3 }], edges: [], moves: [],
     initialDotCount: 1, startingPlayer: 0, nextDotId: 1, ...buildInitialTopology(1),
@@ -211,9 +211,16 @@ test('resolveMovePlacement: a lone self-loop with no siblings returns empty plac
   const { placement, exteriorSide } = resolveMovePlacement(
     state, 0, 0, 0, 0, loop, () => null, () => null
   );
-  // K = ∅ → no placement, no exterior side (ordinary lone loop).
+  // K = ∅ → no placement (nobody to place). exteriorSide is NOT
+  // null, though — corrected after a stress test found the original
+  // "K empty → always null" assumption corrupts outerFaceAnchor even
+  // here: the dot and its own sprout both have 1 life left after
+  // this move, so a real follow-up move is still possible (verified:
+  // connecting them back to each other resolves and validates
+  // correctly only with a real exteriorSide recorded here). See
+  // migration-plan.md's stress-testing entry.
   assert.deepEqual(placement, {});
-  assert.equal(exteriorSide, null);
+  assert.equal(exteriorSide, 2);
 });
 
 // ── PR 10b: interior side determined by real geometry ─────────────

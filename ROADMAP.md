@@ -595,6 +595,30 @@ feature gaps, sequenced as follows (agreed July 2026):
   without crossing anything). 233/233 tests. No "Game Over" banner in
   the browser yet — deliberately deferred as a small separate
   follow-on.
+- **Post-PR-11 stress testing (Jared's suggestion) — three more real
+  bugs found and fixed; a fourth, deeper issue found and scoped as
+  PR 10d.** A randomized simulator drawing REAL geometric curves
+  through `resolveMoveCorners`/`resolveMovePlacement` (the actual
+  layer PR 10a/b/c bugs lived in — PR 11's own random-game test never
+  exercised it) found: (1) K = ∅ self-loops never got a real
+  `exteriorSide`, corrupting outer-face bookkeeping even with nothing
+  to place; (2) the same gap for K = ∅ different-dot splits, fixed via
+  a non-geometric dart-membership check rather than fragile
+  point-in-polygon (a reference dot is typically a pendant sitting
+  exactly on its own polygon's boundary); (3) a bridge-point tie-break
+  regression against an existing PR 9 test. All three fixed and
+  verified. 234/234 tests.
+- **PR 10d — systematic outer-face tracking through arbitrary move
+  sequences (found, NOT fixed, design not started).** The same stress
+  test still fails ~8 of 10 random games even after the three fixes
+  above, each at increasing move depth — suggesting a deeper,
+  structural gap rather than more independent bugs: there's no single
+  mechanism maintaining "which face is truly exterior" as an invariant
+  through arbitrary move sequences, just patches for shapes of the
+  problem found so far. Deliberately not chased further this session
+  to avoid an unbounded sequence of narrow patches. See
+  docs/migration-plan.md for the full record and scope for the design
+  pass this needs.
 - **PR 12 — Crossing detection integrated into engine rules,** reusing
   the geometry primitives that already exist from v0.7
   (`crossingDetection.js`) — their fit against the new corner/
